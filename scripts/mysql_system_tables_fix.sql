@@ -650,6 +650,8 @@ ALTER TABLE user ADD max_statement_time decimal(12,6) DEFAULT 0 NOT NULL;
 --  we want password_expired column to have collation utf8_general_ci.
 ALTER TABLE user MODIFY password_expired ENUM('N', 'Y') COLLATE utf8_general_ci DEFAULT 'N' NOT NULL;
 ALTER TABLE user MODIFY is_role enum('N', 'Y') COLLATE utf8_general_ci DEFAULT 'N' NOT NULL;
+ALTER TABLE user ADD is_locked enum('N', 'Y') COLLATE utf8_general_ci DEFAULT 'N' NOT NULL AFTER max_statement_time;
+ALTER TABLE user MODIFY is_locked enum('N', 'Y') COLLATE utf8_general_ci DEFAULT 'N' NOT NULL;
 
 -- Checking for any duplicate hostname and username combination are exists.
 -- If exits we will throw error.
