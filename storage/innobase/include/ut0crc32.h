@@ -47,9 +47,11 @@ typedef uint32_t	(*ut_crc32_func_t)(const byte* ptr, ulint len);
 /** Pointer to CRC32 calculation function. */
 extern ut_crc32_func_t	ut_crc32;
 
+#ifdef WORDS_BIGENDIAN
 /** Pointer to CRC32 calculation function, which uses big-endian byte order
 when converting byte strings to integers internally. */
 extern ut_crc32_func_t	ut_crc32_legacy_big_endian;
+#endif /* WORDS_BIGENDIAN */
 
 /** Pointer to CRC32-byte-by-byte calculation function (byte order agnostic,
 but very slow). */

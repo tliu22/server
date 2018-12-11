@@ -4909,18 +4909,12 @@ corrupt:
 @param[in]	data			compressed page
 @param[in]	size			size of compressed page
 @param[in]	algo			algorithm to use
-@param[in]	use_legacy_big_endian	only used if algo is
-SRV_CHECKSUM_ALGORITHM_CRC32 or SRV_CHECKSUM_ALGORITHM_STRICT_CRC32 - if true
-then use big endian byteorder when converting byte strings to integers.
-SRV_CHECKSUM_ALGORITHM_CRC32 or SRV_CHECKSUM_ALGORITHM_STRICT_CRC32 - if true
-then use big endian byteorder when converting byte strings to integers.
 @return page checksum */
 uint32_t
 page_zip_calc_checksum(
 	const void*			data,
 	ulint				size,
-	srv_checksum_algorithm_t	algo,
-	bool				use_legacy_big_endian /* = false */)
+	srv_checksum_algorithm_t	algo)
 {
 	uLong		adler;
 	const Bytef*	s = static_cast<const byte*>(data);
@@ -4934,9 +4928,10 @@ page_zip_calc_checksum(
 		{
 			ut_ad(size > FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
 
-			ut_crc32_func_t	crc32_func = use_legacy_big_endian
-				? ut_crc32_legacy_big_endian
-				: ut_crc32;
+			ut_crc32_func_t	crc32_func = ut_crc32;
+#ifdef WORDS_BIGENDIAN
+			crc32_func = ut_crc32_legacy_big_endian;
+#endif
 
 			const uint32_t	crc32
 				= crc32_func(
@@ -5070,13 +5065,6 @@ page_zip_verify_checksum(
 
 	switch (curr_algo) {
 	case SRV_CHECKSUM_ALGORITHM_STRICT_CRC32:
-		calc = page_zip_calc_checksum(data, size, curr_algo, true);
-		if (calc == stored) {
-			legacy_big_endian_checksum = true;
-			return TRUE;
-		}
-
-		return FALSE;
 	case SRV_CHECKSUM_ALGORITHM_STRICT_INNODB:
 	case SRV_CHECKSUM_ALGORITHM_STRICT_NONE:
 		return FALSE;
@@ -5085,14 +5073,7 @@ page_zip_verify_checksum(
 			return(TRUE);
 		}
 
-		calc = page_zip_calc_checksum(data, size, curr_algo, true);
 		crc32 = calc;
-
-		if (crc32 == stored) {
-			legacy_big_endian_checksum = true;
-			return TRUE;
-		}
-
 		innodb = static_cast<ib_uint32_t>(page_zip_calc_checksum(
 			data, size, SRV_CHECKSUM_ALGORITHM_INNODB));
 		break;

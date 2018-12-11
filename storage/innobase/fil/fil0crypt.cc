@@ -2637,11 +2637,7 @@ fil_space_verify_crypt_checksum(
 		switch (algorithm) {
 		case SRV_CHECKSUM_ALGORITHM_STRICT_CRC32:
 			valid = buf_page_is_checksum_valid_crc32(page, checksum1,
-								 checksum2, false);
-			if (!valid) {
-				valid = buf_page_is_checksum_valid_crc32(
-						page, checksum1, checksum2, true);
-			}
+								 checksum2);
 			break;
 		case SRV_CHECKSUM_ALGORITHM_STRICT_INNODB:
 			valid = buf_page_is_checksum_valid_innodb(page, checksum1,
@@ -2654,15 +2650,9 @@ fil_space_verify_crypt_checksum(
 		case SRV_CHECKSUM_ALGORITHM_CRC32:
 		case SRV_CHECKSUM_ALGORITHM_INNODB:
 			valid = buf_page_is_checksum_valid_crc32(
-					page, checksum1, checksum2, false);
-			if (!valid) {
-				valid = buf_page_is_checksum_valid_crc32(
-						page, checksum1, checksum2,
-						true)
-					|| buf_page_is_checksum_valid_innodb(
-						page, checksum1, checksum2);
-			}
-
+					page, checksum1, checksum2)
+				|| buf_page_is_checksum_valid_innodb(
+					page, checksum1, checksum2);
 			break;
 		case SRV_CHECKSUM_ALGORITHM_NONE:
 			break;
@@ -2691,8 +2681,7 @@ fil_space_verify_crypt_checksum(
 		ib::info()
 			<< "If unencrypted: stored checksum [" << checksum1
 			<< ":" << checksum2 << "] calculated crc32 ["
-			<< buf_calc_page_crc32(page, false) << ":"
-			<< buf_calc_page_crc32(page, true) << "] innodb ["
+			<< buf_calc_page_crc32(page) << "] innodb ["
 			<< buf_calc_page_old_checksum(page) << ":"
 			<< buf_calc_page_new_checksum(page) << "] LSN "
 			<< mach_read_from_4(page + FIL_PAGE_LSN);

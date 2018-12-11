@@ -92,9 +92,11 @@ mysys/my_perf.c, contributed by Facebook under the following license.
 /** Pointer to CRC32 calculation function. */
 ut_crc32_func_t	ut_crc32;
 
+#ifdef WORDS_BIGENDIAN
 /** Pointer to CRC32 calculation function, which uses big-endian byte order
 when converting byte strings to integers internally. */
 ut_crc32_func_t	ut_crc32_legacy_big_endian;
+#endif /* WORDS_BIGENDIAN */
 
 /** Pointer to CRC32-byte-by-byte calculation function (byte order agnostic,
 but very slow). */
@@ -396,6 +398,7 @@ ut_crc32_hw(
 	return(~crc);
 }
 
+#ifdef WORDS_BIGENDIAN
 /** Calculates CRC32 using hardware/CPU instructions.
 This function uses big endian byte ordering when converting byte sequence to
 integers.
@@ -445,6 +448,7 @@ ut_crc32_legacy_big_endian_hw(
 
 	return(~crc);
 }
+#endif /* WORDS_BIGENDIAN */
 
 /** Calculates CRC32 using hardware/CPU instructions.
 This function processes one byte at a time (very slow) and thus it does
@@ -653,6 +657,7 @@ ut_crc32_sw(
 	return(~crc);
 }
 
+#ifdef WORDS_BIGENDIAN
 /** Calculates CRC32 in software, without using CPU instructions.
 This function uses big endian byte ordering when converting byte sequence to
 integers.
@@ -704,6 +709,7 @@ ut_crc32_legacy_big_endian_sw(
 
 	return(~crc);
 }
+#endif /* WORDS_BIGENDIAN */
 
 /** Calculates CRC32 in software, without using CPU instructions.
 This function processes one byte at a time (very slow) and thus it does
@@ -736,7 +742,9 @@ ut_crc32_init()
 {
 	ut_crc32_slice8_table_init();
 	ut_crc32 = ut_crc32_sw;
+#ifdef WORDS_BIGENDIAN
 	ut_crc32_legacy_big_endian = ut_crc32_legacy_big_endian_sw;
+#endif /* WORDS_BIGENDIAN */
 	ut_crc32_byte_by_byte = ut_crc32_byte_by_byte_sw;
 	ut_crc32_implementation = "Using generic crc32 instructions";
 
@@ -770,7 +778,9 @@ ut_crc32_init()
 
 	if (features_ecx & 1 << 20) {
 		ut_crc32 = ut_crc32_hw;
+#ifdef WORDS_BIGENDIAN
 		ut_crc32_legacy_big_endian = ut_crc32_legacy_big_endian_hw;
+#endif /* WORDS_BIGENDIAN */
 		ut_crc32_byte_by_byte = ut_crc32_byte_by_byte_hw;
 		ut_crc32_implementation = "Using SSE2 crc32 instructions";
 	}

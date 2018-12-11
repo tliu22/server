@@ -756,17 +756,14 @@ buf_page_is_zeroes(
 @param[in]	read_buf		database page
 @param[in]	checksum_field1		new checksum field
 @param[in]	checksum_field2		old checksum field
-@param[in]	use_legacy_big_endian   use legacy big endian algorithm
 @return true if the page is in crc32 checksum format. */
 bool
 buf_page_is_checksum_valid_crc32(
 	const byte*			read_buf,
 	ulint				checksum_field1,
-	ulint				checksum_field2,
-	bool				use_legacy_big_endian)
+	ulint				checksum_field2)
 {
-	const uint32_t	crc32 = buf_calc_page_crc32(read_buf,
-						    use_legacy_big_endian);
+	const uint32_t	crc32 = buf_calc_page_crc32(read_buf);
 
 #ifdef UNIV_INNOCHECKSUM
 	if (log_file
@@ -1081,19 +1078,11 @@ buf_page_is_corrupted(
 	const srv_checksum_algorithm_t	curr_algo =
 		static_cast<srv_checksum_algorithm_t>(srv_checksum_algorithm);
 
-	bool	legacy_checksum_checked = false;
-
 	switch (curr_algo) {
 	case SRV_CHECKSUM_ALGORITHM_STRICT_CRC32:
 
 		if (buf_page_is_checksum_valid_crc32(read_buf,
-			checksum_field1, checksum_field2, false)) {
-			return false;
-		}
-
-		if (buf_page_is_checksum_valid_crc32(read_buf,
-			checksum_field1, checksum_field2, true)) {
-			legacy_big_endian_checksum = true;
+			checksum_field1, checksum_field2)) {
 			return false;
 		}
 
@@ -1140,22 +1129,8 @@ buf_page_is_corrupted(
 			if (srv_checksum_algorithm
 			    == SRV_CHECKSUM_ALGORITHM_CRC32) {
 
-				if (legacy_big_endian_checksum) {
-					crc32 = buf_calc_page_crc32(read_buf, true);
-					legacy_checksum_checked = true;
-				} else {
-					crc32 = buf_calc_page_crc32(read_buf, false);
-				}
-
+				crc32 = buf_calc_page_crc32(read_buf);
 				crc32_inited = true;
-
-				if (checksum_field2 != crc32
-				    && !legacy_checksum_checked) {
-					crc32 = buf_calc_page_crc32(read_buf, true);
-					if (checksum_field2 == crc32) {
-						legacy_big_endian_checksum = true;
-					}
-				}
 
 				if (checksum_field2 != crc32
 				    && checksum_field2
@@ -1186,8 +1161,7 @@ buf_page_is_corrupted(
 
 				if (!crc32_inited) {
 					crc32 = buf_calc_page_crc32(
-						read_buf,
-						legacy_big_endian_checksum);
+						read_buf);
 					crc32_inited = true;
 				}
 
@@ -1205,7 +1179,7 @@ buf_page_is_corrupted(
 
 					if (!crc32_inited) {
 						crc32 = buf_calc_page_crc32(
-							read_buf, false);
+							read_buf);
 						crc32_inited = true;
 					}
 
@@ -1262,10 +1236,6 @@ buf_page_print(const byte* read_buf, const page_size_t& page_size)
 			<< page_zip_calc_checksum(
 				read_buf, page_size.physical(),
 				SRV_CHECKSUM_ALGORITHM_CRC32)
-			<< "/"
-			<< page_zip_calc_checksum(
-				read_buf, page_size.physical(),
-				SRV_CHECKSUM_ALGORITHM_CRC32, true)
 			<< ", "
 			<< buf_checksum_algorithm_name(
 				SRV_CHECKSUM_ALGORITHM_INNODB)
@@ -1292,8 +1262,6 @@ buf_page_print(const byte* read_buf, const page_size_t& page_size)
 	} else {
 		const uint32_t	crc32 = buf_calc_page_crc32(read_buf);
 
-		const uint32_t	crc32_legacy = buf_calc_page_crc32(read_buf,
-								   true);
 		ulint page_type = fil_page_get_type(read_buf);
 
 		ib::info() << "Uncompressed page, stored checksum in field1 "
@@ -1302,7 +1270,7 @@ buf_page_print(const byte* read_buf, const page_size_t& page_size)
 			<< ", calculated checksums for field1: "
 			<< buf_checksum_algorithm_name(
 				SRV_CHECKSUM_ALGORITHM_CRC32) << " "
-			<< crc32 << "/" << crc32_legacy
+			<< crc32
 			<< ", "
 			<< buf_checksum_algorithm_name(
 				SRV_CHECKSUM_ALGORITHM_INNODB) << " "
@@ -1319,7 +1287,7 @@ buf_page_print(const byte* read_buf, const page_size_t& page_size)
 			<< ", calculated checksums for field2: "
 			<< buf_checksum_algorithm_name(
 				SRV_CHECKSUM_ALGORITHM_CRC32) << " "
-			<< crc32 << "/" << crc32_legacy
+			<< crc32
 			<< ", "
 			<< buf_checksum_algorithm_name(
 				SRV_CHECKSUM_ALGORITHM_INNODB) << " "
@@ -3957,10 +3925,6 @@ buf_zip_decompress(
 			<< ", crc32: "
 			<< page_zip_calc_checksum(
 				frame, size, SRV_CHECKSUM_ALGORITHM_CRC32)
-			<< "/"
-			<< page_zip_calc_checksum(
-				frame, size, SRV_CHECKSUM_ALGORITHM_CRC32,
-				true)
 			<< " innodb: "
 			<< page_zip_calc_checksum(
 				frame, size, SRV_CHECKSUM_ALGORITHM_INNODB)
