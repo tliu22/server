@@ -2622,7 +2622,7 @@ fil_space_verify_crypt_checksum(
 	uint32_t checksum1 = mach_read_from_4(page + FIL_PAGE_SPACE_OR_CHKSUM);
 	uint32_t checksum2;
 
-	bool valid;
+	bool valid = false;
 
 	if (page_size.is_compressed()) {
 		valid = checksum1 == cchecksum1;
@@ -2630,12 +2630,43 @@ fil_space_verify_crypt_checksum(
 	} else {
 		checksum2 = mach_read_from_4(
 			page + UNIV_PAGE_SIZE - FIL_PAGE_END_LSN_OLD_CHKSUM);
-		valid = buf_page_is_checksum_valid_crc32(
-			page, checksum1, checksum2, false
-			/* FIXME: also try the original crc32 that was
-			buggy on big-endian architectures? */)
-			|| buf_page_is_checksum_valid_innodb(
-				page, checksum1, checksum2);
+
+		srv_checksum_algorithm_t algorithm =
+			static_cast<srv_checksum_algorithm_t>(
+					srv_checksum_algorithm);
+		switch (algorithm) {
+		case SRV_CHECKSUM_ALGORITHM_STRICT_CRC32:
+			valid = buf_page_is_checksum_valid_crc32(page, checksum1,
+								 checksum2, false);
+			if (!valid) {
+				valid = buf_page_is_checksum_valid_crc32(
+						page, checksum1, checksum2, true);
+			}
+			break;
+		case SRV_CHECKSUM_ALGORITHM_STRICT_INNODB:
+			valid = buf_page_is_checksum_valid_innodb(page, checksum1,
+								  checksum2);
+			break;
+		case SRV_CHECKSUM_ALGORITHM_STRICT_NONE:
+			valid = buf_page_is_checksum_valid_none(page, checksum1,
+								checksum2);
+			break;
+		case SRV_CHECKSUM_ALGORITHM_CRC32:
+		case SRV_CHECKSUM_ALGORITHM_INNODB:
+			valid = buf_page_is_checksum_valid_crc32(
+					page, checksum1, checksum2, false);
+			if (!valid) {
+				valid = buf_page_is_checksum_valid_crc32(
+						page, checksum1, checksum2,
+						true)
+					|| buf_page_is_checksum_valid_innodb(
+						page, checksum1, checksum2);
+			}
+
+			break;
+		case SRV_CHECKSUM_ALGORITHM_NONE:
+			break;
+		}
 	}
 
 	if (encrypted && valid) {
