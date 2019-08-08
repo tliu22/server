@@ -1,87 +1,93 @@
-Code status:
-------------
+# MDEV 18188: Maintain persistent COUNT(*) in InnoDB
+### [Objective](https://jira.mariadb.org/browse/MDEV-18188)
+>Query planning needs to know the number of records in a table. Currently, InnoDB only provides an estimate of this.
+If InnoDB kept accurate track of the number of records in a table, then it would not only benefit statistics, but also limited cases like \[simple COUNT(*) queries\].
 
-* [![Travis CI status](https://secure.travis-ci.org/MariaDB/server.png?branch=10.4)](https://travis-ci.org/MariaDB/server) travis-ci.org (10.4 branch)
-* [![Appveyor CI status](https://ci.appveyor.com/api/projects/status/4u6pexmtpuf8jq66?svg=true)](https://ci.appveyor.com/project/rasmushoj/server) ci.appveyor.com
+This implementation intends to persistently store a count of a table's committed records within the clustered index (see [Committed Count Storage](#Committed-Count-Storage)). Meanwhile, it will ephemerally store a count of each table's uncommitted records within the `trx_t` struct for each transaction.The uncommitted count is the difference between the committed `COUNT(*)` and the transaction's read view `COUNT(*)`.
 
-## MariaDB: drop-in replacement for MySQL
+This implementation is only applicable for the READ COMMITTED isolation level.
 
-MariaDB is designed as a drop-in replacement of MySQL(R) with more
-features, new storage engines, fewer bugs, and better performance.
+### Committed Count Storage
+The committed count for a table will be stored at the offset of `4 + 2 * num_non_pk_fields` bytes within `mblob` of the clustered index's hidden metadata record, following the `INSTANT DROP/ADD` columns that are also stored in `mblob`.
 
-MariaDB is brought to you by the MariaDB Foundation and the MariaDB corporation.
-Please read the CREDITS file for details about the MariaDB Foundation,
-and who is developing MariaDB.
+### API
+`dict0mem.h`:
+```c
+// Committed count (per primary index)
+struct dict_index_t {
+    ...
+    bool is_init_committed_count();
+    void init_committed_count(ulint init_count);
+    void add_committed_count(lint diff_count);
+    ulint read_committed_count();
+    ...
+}
+```
+`trx0trx.h`:
+```c
+// Uncommitted count (per transaction and table)
+struct trx_t {
+    ...
+    void add_uncommitted_count(dict_table_t* table, lint diff_count); /* If uncommitted count for table is not yet initialized, 
+                                                                       * it will be initialized with value 0 */
+    lint read_uncommitted_count(dict_table_t* table);  /* Returns 0 if no writes to table have been done */
+    ...
+}
+```
 
-MariaDB is developed by many of the original developers of MySQL who
-now work for the MariaDB Corporation, the MariaDB Foundation and by
-many people in the community.
+### Functions to Change
+```c
+dberr_t open_table_func(...) {
+    ...
+    if (clustered_index->is_init_committed_count()) {
+        committed_count = clustered_index->read_committed_count();
+    } else {
+        // Calculate COUNT(*) into num_rows
+        ...
+        clustered_index->init_committed_count(num_rows);
+    }
+    ...
+}
+``` 
 
-MySQL, which is the base of MariaDB, is a product and trademark of Oracle
-Corporation, Inc. For a list of developers and other contributors,
-see the Credits appendix.  You can also run 'SHOW authors' to get a
-list of active contributors.
+`row0mysql.cc`:
+```c
+// SELECT COUNT(*)
+dberr_t row_scan_index_for_mysql(...) {
+    ...
+    *n_rows = index->read_committed_count() 
+              + trx->read_uncommitted_count(table);
+    ...
+}
+```
+```c
+// INSERT
+dberr_t insert_func(...) {
+    ...
+    trx->add_uncommitted_count(num_inserted_rows);
+    ...
+}
+```
+```c
+// DELETE
+dberr_t delete_func(...) {
+    ...
+    trx->add_uncommitted_count((-1) * num_deleted_rows);
+    ...
+}
+```
+```c
+// COMMIT
+dberr_t commit_func(...) {
+    ...
+    for modified_table in modified_tables {
+        modified_table->clustered_index->add_committed_count(
+            trx->read_uncommitted_count(modified_table)
+        );
+    }
+    ...
+}
+```
 
-A description of the MariaDB project and a manual can be found at:
-
-https://mariadb.com/kb/en/
-
-https://mariadb.com/kb/en/mariadb-vs-mysql-features/
-
-https://mariadb.com/kb/en/mariadb-versus-mysql-compatibility/
-
-https://mariadb.com/kb/en/library/new-and-old-releases/
-
-https://mariadb.org/
-
-As MariaDB is a full replacement of MySQL, the MySQL manual at
-http://dev.mysql.com/doc is generally applicable.
-
-Help
------
-
-More help is available from the Maria Discuss mailing list
-https://launchpad.net/~maria-discuss
-and the #maria IRC channel on Freenode.
-
-Live QA for beginner contributors
-----
-MariaDB has a dedicated time each week when we answer new contributor questions live on Zulip and IRC.
-From 8:00 to 10:00 UTC on Mondays, and 10:00 to 12:00 UTC on Thursdays,
-anyone can ask any questions they’d like, and a live developer will be available to assist.
-
-New contributors can ask questions any time, but we will provide immediate feedback during that interval.
-
-Licensing
----------
-
-***************************************************************************
-
-NOTE: 
-
-MariaDB is specifically available only under version 2 of the GNU
-General Public License (GPLv2). (I.e. Without the "any later version"
-clause.) This is inherited from MySQL. Please see the README file in
-the MySQL distribution for more information.
-
-License information can be found in the COPYING file. Third party
-license information can be found in the THIRDPARTY file.
-
-***************************************************************************
-
-Bug Reports
-------------
-
-Bug and/or error reports regarding MariaDB should be submitted at:
-https://jira.mariadb.org
-
-For reporting security vulnerabilities see:
-https://mariadb.org/about/security-policy/
-
-Bugs in the MySQL code can also be submitted at:
-https://bugs.mysql.com
-
-The code for MariaDB, including all revision history, can be found at:
-https://github.com/MariaDB/server
-
-***************************************************************************
+### Synchronization
+Committed count functions will be synchronized by a lock. Uncommitted count functions will be implemented with an atomic integer for the count.
