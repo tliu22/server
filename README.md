@@ -37,7 +37,8 @@ struct trx_t {
 
 ### Functions to Change
 ```c
-dberr_t open_table_func(...) {
+// Open table
+int ha_innobase::open(...) {
     ...
     if (clustered_index->is_init_committed_count()) {
         committed_count = clustered_index->read_committed_count();
@@ -49,11 +50,9 @@ dberr_t open_table_func(...) {
     ...
 }
 ``` 
-
-`row0mysql.cc`:
 ```c
 // SELECT COUNT(*)
-dberr_t row_scan_index_for_mysql(...) {
+int ha_innobase::check(...) {
     ...
     *n_rows = index->read_committed_count() 
               + trx->read_uncommitted_count(table);
@@ -62,7 +61,7 @@ dberr_t row_scan_index_for_mysql(...) {
 ```
 ```c
 // INSERT
-dberr_t insert_func(...) {
+int ha_innobase::write_row(...) {
     ...
     trx->add_uncommitted_count(num_inserted_rows);
     ...
@@ -70,7 +69,7 @@ dberr_t insert_func(...) {
 ```
 ```c
 // DELETE
-dberr_t delete_func(...) {
+int ha_innobase::delete_row(...) { 
     ...
     trx->add_uncommitted_count((-1) * num_deleted_rows);
     ...
@@ -78,7 +77,7 @@ dberr_t delete_func(...) {
 ```
 ```c
 // COMMIT
-dberr_t commit_func(...) {
+static int innobase_commit(...) {
     ...
     for modified_table in modified_tables {
         modified_table->clustered_index->add_committed_count(
