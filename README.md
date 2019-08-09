@@ -8,7 +8,18 @@ This implementation intends to persistently store a count of a table's committed
 This implementation is only applicable for the READ COMMITTED isolation level.
 
 ### Committed Count Storage
-The committed count for a table will be stored at the offset of `4 + 2 * num_non_pk_fields` bytes within `mblob` of the clustered index's hidden metadata record, following the `INSTANT DROP/ADD` columns that are also stored in `mblob`.
+`data0type.h`:
+```c
+/* Any hidden metadata record that tracks committed count will have this flag 
+ * set in its info_bits */
+#define REC_INFO_COMMITTED_COUNT_FLAG	0x40UL
+```
+
+If the clustered index's hidden metadata record already contains a `mblob` pointer (`info_bits & REC_INFO_DELETE_FLAG == REC_INFO_DELETE_FLAG`), then the committed count will be stored at the offset of `4 + 2 * num_non_pk_fields` bytes within `mblob` of the clustered index's hidden metadata record, following the `INSTANT DROP/ADD` columns that have been stored in `mblob`.
+
+Otherwise, if the clustered index's hidden metadata record doesn't contain a `mblob` pointer (`info_bits & REC_INFO_DELETE_FLAG == 0`), `mblob` must be initialized and its pointer added to the hidden metadata record. The committed count will be initially stored at offset `0` in `mblob` until `INSTANT DROP/ADD` columns are added, at which point, the committed count will be shifted over to aforementioned offset of `4 + 2 * num_non_pk_fields` bytes.
+
+In the event the clustered index doesn't contain a hidden metadata record (first user record's `info_bits & REC_INFO_MIN_REC_FLAG == 0`), a hidden metadata record will be created as the first user record.
 
 ### API
 `dict0mem.h`:
@@ -36,6 +47,7 @@ struct trx_t {
 ```
 
 ### Functions to Change
+`ha_innodb.cc`:
 ```c
 // Open table
 int ha_innobase::open(...) {
@@ -49,8 +61,7 @@ int ha_innobase::open(...) {
     }
     ...
 }
-``` 
-```c
+
 // SELECT COUNT(*)
 int ha_innobase::check(...) {
     ...
@@ -58,24 +69,21 @@ int ha_innobase::check(...) {
               + trx->read_uncommitted_count(table);
     ...
 }
-```
-```c
+
 // INSERT
 int ha_innobase::write_row(...) {
     ...
     trx->add_uncommitted_count(num_inserted_rows);
     ...
 }
-```
-```c
+
 // DELETE
 int ha_innobase::delete_row(...) { 
     ...
     trx->add_uncommitted_count((-1) * num_deleted_rows);
     ...
 }
-```
-```c
+
 // COMMIT
 static int innobase_commit(...) {
     ...
