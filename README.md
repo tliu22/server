@@ -89,7 +89,6 @@ static int innobase_commit(...) {
 
 `btr0cur.cc`:
 ```c
-// Check next 
 static dberr_t btr_cur_instant_init_low(...) {
   ...
   if (info_bits & (REC_INFO_MIN_REC_FLAG | REC_INFO_DELETED_FLAG)) {
