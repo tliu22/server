@@ -8,18 +8,7 @@ This implementation intends to persistently store a count of a table's committed
 This implementation is only applicable for the READ COMMITTED isolation level.
 
 ### Committed Count Storage
-`data0type.h`:
-```c
-/* Any hidden metadata record that tracks committed count will have this flag 
- * set in its info_bits */
-#define REC_INFO_COMMITTED_COUNT_FLAG	0x40UL
-```
-
-If the clustered index's hidden metadata record already contains a `mblob` pointer (`info_bits & REC_INFO_DELETE_FLAG == REC_INFO_DELETE_FLAG`), then the committed count will be stored at the offset of `4 + 2 * num_non_pk_fields` bytes within `mblob` of the clustered index's hidden metadata record, following the `INSTANT DROP/ADD` columns that have been stored in `mblob`.
-
-Otherwise, if the clustered index's hidden metadata record doesn't contain a `mblob` pointer (`info_bits & REC_INFO_DELETE_FLAG == 0`), `mblob` must be initialized and its pointer added to the hidden metadata record. The committed count will be initially stored at offset `0` in `mblob` until `INSTANT DROP/ADD` columns are added, at which point, the committed count will be shifted over to aforementioned offset of `4 + 2 * num_non_pk_fields` bytes.
-
-In the event the clustered index doesn't contain a hidden metadata record (first user record's `info_bits & REC_INFO_MIN_REC_FLAG == 0`), a hidden metadata record will be created as the first user record.
+Create a committed count hidden metadata record with `info_bits &= (REC_INFO_MIN_REC_FLAG | REC_INFO_DELETED_FLAG)`. This record will contain a metadata BLOB pointer. To distinguish the committed count hidden metadata record from the `INSTANT` hidden metadata record, the first 4 bytes in the former's BLOB will be set to `REC_MAX_N_FIELDS` (from `rem0types.h`), since the first 4 bytes in the latter's BLOB will be interpreted as `num_non_pk_fields`, which should always be less than `REC_MAX_N_FIELDS - 3`. The next 8 bytes of the BLOB represent the table's persisted committed count in the form of an 64-bit unsigned integer.
 
 ### API
 `dict0mem.h`:
@@ -39,9 +28,11 @@ struct dict_index_t {
 // Uncommitted count (per transaction and table)
 struct trx_t {
     ...
-    void add_uncommitted_count(dict_table_t* table, lint diff_count); /* If uncommitted count for table is not yet initialized, 
-                                                                       * it will be initialized with value 0 */
-    lint read_uncommitted_count(dict_table_t* table);  /* Returns 0 if no writes to table have been done */
+    /* If uncommitted count for table is not yet initialized, 
+     * it will be initialized with value 0 */
+    void add_uncommitted_count(dict_table_t* table, lint diff_count); 
+    /* Returns 0 if no writes to table have been done */
+    lint read_uncommitted_count(dict_table_t* table);  
     ...
 }
 ```
@@ -93,6 +84,22 @@ static int innobase_commit(...) {
         );
     }
     ...
+}
+```
+
+`btr0cur.cc`:
+```c
+// Check next 
+static dberr_t btr_cur_instant_init_low(...) {
+  ...
+  if (info_bits & (REC_INFO_MIN_REC_FLAG | REC_INFO_DELETED_FLAG)) {
+      if (first 4 bytes after headers == REC_MAX_N_FIELDS) {
+          // Current record is committed count metadata record, move onto next
+          page_cur_move_to_next(&cur.page_cur); 
+          ...
+      } 
+  }
+  ...
 }
 ```
 
