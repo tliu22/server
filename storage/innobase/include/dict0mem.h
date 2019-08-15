@@ -1697,16 +1697,18 @@ struct dict_table_t {
 		return NULL;
 	}
 
-	/** Serialise metadata of dropped or reordered columns.
+	/** Serialise metadata BLOB, consisting of dropped or reordered columns,
+	committed count and uncommitted count.
 	@param[in,out]	heap	memory heap for allocation
 	@param[out]	field	data field with the metadata */
-	inline void serialise_columns(mem_heap_t* heap, dfield_t* field) const;
+	inline void serialise_mblob(mem_heap_t* heap, dfield_t* field) const;
 
-	/** Reconstruct dropped or reordered columns.
-	@param[in]	metadata	data from serialise_columns()
+	/** Deserialise metadata BLOB and reconstruct dropped or reordered columns,
+	committed count and uncommitted count.
+	@param[in]	metadata	data from serialise_mblob()
 	@param[in]	len		length of the metadata, in bytes
 	@return whether parsing the metadata failed */
-	bool deserialise_columns(const byte* metadata, ulint len);
+	bool deserialise_mblob(const byte* metadata, ulint len);
 
 	/** Set is_instant() before instant_column().
 	@param[in]	old		previous table definition
@@ -1775,6 +1777,12 @@ struct dict_table_t {
 		n_foreign_key_checks_running--;
 		ut_ad(fk_checks > 0);
 	}
+
+	/** Reconstruct committed count and uncommitted count from metadata
+	@param[in]	metadata	data from metadata BLOB
+	@param[in]	len		    length of the metadata, in bytes
+	@return whether parsing the metadata failed */
+	bool deserialise_counts(const byte* metadata, ulint len);
 
 private:
 	/** Initialize instant->field_map.
@@ -2128,6 +2136,10 @@ public:
 	determine whether we can evict the table from the dictionary cache.
 	It is protected by lock_sys.mutex. */
 	ulint					n_rec_locks;
+
+	bool                           counts_inited;
+	Atomic_counter<ib_int64_t>     committed_count;
+	Atomic_counter<ib_int64_t>     uncommitted_count;
 
 private:
 	/** Count of how many handles are opened to this table. Dropping of the

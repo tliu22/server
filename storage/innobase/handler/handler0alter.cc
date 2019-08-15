@@ -5510,18 +5510,20 @@ innobase_drop_virtual_try(
 	return false;
 }
 
-/** Serialise metadata of dropped or reordered columns.
+/** Serialise metadata BLOB, consisting of dropped or reordered columns,
+committed count and uncommitted count.
 @param[in,out]	heap	memory heap for allocation
 @param[out]	field	data field with the metadata */
 inline
-void dict_table_t::serialise_columns(mem_heap_t* heap, dfield_t* field) const
+void dict_table_t::serialise_mblob(mem_heap_t* heap, dfield_t* field) const
 {
 	DBUG_ASSERT(instant);
 	const dict_index_t& index = *UT_LIST_GET_FIRST(indexes);
 	unsigned n_fixed = index.first_user_field();
 	unsigned num_non_pk_fields = index.n_fields - n_fixed;
 
-	ulint len = 4 + num_non_pk_fields * 2;
+	ulint len = counts_inited ? 20 + num_non_pk_fields * 2 :
+		4 + num_non_pk_fields * 2;
 
 	byte* data = static_cast<byte*>(mem_heap_alloc(heap, len));
 
@@ -5534,6 +5536,14 @@ void dict_table_t::serialise_columns(mem_heap_t* heap, dfield_t* field) const
 	for (ulint i = n_fixed; i < index.n_fields; i++) {
 		mach_write_to_2(data, instant->field_map[i - n_fixed]);
 		data += 2;
+	}
+
+	if (counts_inited) {
+		mach_write_to_8(data, index.table->committed_count);
+		data += 8;
+
+		mach_write_to_8(data, index.table->uncommitted_count);
+		data += 8;
 	}
 }
 
@@ -5564,7 +5574,7 @@ dict_index_t::instant_metadata(const dtuple_t& row, mem_heap_t* heap) const
 		dfield_t* dfield = dtuple_get_nth_field(entry, i);
 
 		if (i == first_user_field()) {
-			table->serialise_columns(heap, dfield);
+			table->serialise_mblob(heap, dfield);
 			dfield->type.metadata_blob_init();
 			field--;
 			continue;
