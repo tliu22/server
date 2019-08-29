@@ -13309,6 +13309,24 @@ ha_innobase::rename_table(
 }
 
 /*********************************************************************//**
+If committed count is initialized, returns exact number of records;
+otherwise returns an estimate of index records
+@return number of rows */
+
+ha_rows
+ha_innobase::records()
+{	
+	dict_table_t* ib_table = m_prebuilt->table;
+	if (ib_table->committed_count_inited) {
+		trx_t* trx = m_prebuilt->trx;
+		if (trx->isolation_level >= TRX_ISO_READ_COMMITTED) {
+			return ib_table->committed_count + trx->uncommitted_count(ib_table);
+		}
+	}
+	return stats.records;
+}
+
+/*********************************************************************//**
 Estimates the number of index records in a range.
 @return estimated number of rows */
 

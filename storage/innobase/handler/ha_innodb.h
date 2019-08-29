@@ -190,6 +190,8 @@ public:
 		key_range*		min_key,
 		key_range*		max_key);
 
+	ha_rows records();
+
 	ha_rows estimate_rows_upper_bound();
 
 	void update_create_info(HA_CREATE_INFO* create_info);

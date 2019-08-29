@@ -2406,3 +2406,62 @@ trx_set_rw_mode(
 		trx->read_view.set_creator_trx_id(trx->id);
 	}
 }
+
+ib_int64_t get_diff_from_rec(trx_undo_rec_t* undo_rec, table_id_t table_id)
+{
+	ulint type, cmpl_info;
+	bool updated_extern;
+	undo_no_t undo;
+	table_id_t rec_table_id;
+
+	trx_undo_rec_get_pars(undo_rec, &type, &cmpl_info, &updated_extern, &undo,
+		&rec_table_id);
+
+	if (rec_table_id != table_id)
+		return 0;
+
+	switch (type) {
+		case TRX_UNDO_INSERT_REC:
+			return 1;
+		case TRX_UNDO_UPD_DEL_REC:
+		case TRX_UNDO_DEL_MARK_REC:
+			return -1;
+		default:
+			return 0;
+	}
+}
+
+/*************************************************************//**
+Return number of uncommitted records for table within transaction
+@param[in]	table 	table to count uncommitted records for
+*/
+ib_int64_t trx_t::uncommitted_count(dict_table_t* table)
+{
+	trx_undo_t* undo;
+	trx_undo_rec_t* undo_rec;
+	mtr_t mtr;
+	ib_int64_t count = 0;
+
+	undo = rsegs.m_redo.undo;
+
+	mtr_start(&mtr);
+
+	undo_rec = trx_undo_get_first_rec(
+		undo->rseg->space, undo->hdr_page_no, undo->hdr_offset,
+		RW_S_LATCH, &mtr);
+	count += get_diff_from_rec(undo_rec, table->id);
+
+	mtr_commit(&mtr);
+
+	while (undo_rec) {
+		mtr_start(&mtr);
+
+		undo_rec = trx_undo_get_next_rec(undo_rec, undo->hdr_page_no,
+			undo->hdr_offset, &mtr);
+		count += get_diff_from_rec(undo_rec, table->id);
+
+		mtr_commit(&mtr);
+	}
+
+	return count;
+}

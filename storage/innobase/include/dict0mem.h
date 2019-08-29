@@ -1698,13 +1698,13 @@ struct dict_table_t {
 	}
 
 	/** Serialise metadata BLOB, consisting of dropped or reordered columns,
-	committed count and uncommitted count.
+	and committed count.
 	@param[in,out]	heap	memory heap for allocation
 	@param[out]	field	data field with the metadata */
 	inline void serialise_mblob(mem_heap_t* heap, dfield_t* field) const;
 
 	/** Deserialise metadata BLOB and reconstruct dropped or reordered columns,
-	committed count and uncommitted count.
+	and committed count.
 	@param[in]	metadata	data from serialise_mblob()
 	@param[in]	len		length of the metadata, in bytes
 	@return whether parsing the metadata failed */
@@ -1777,12 +1777,6 @@ struct dict_table_t {
 		n_foreign_key_checks_running--;
 		ut_ad(fk_checks > 0);
 	}
-
-	/** Reconstruct committed count and uncommitted count from metadata
-	@param[in]	metadata	data from metadata BLOB
-	@param[in]	len		    length of the metadata, in bytes
-	@return whether parsing the metadata failed */
-	bool deserialise_counts(const byte* metadata, ulint len);
 
 private:
 	/** Initialize instant->field_map.
@@ -2137,9 +2131,8 @@ public:
 	It is protected by lock_sys.mutex. */
 	ulint					n_rec_locks;
 
-	bool                           counts_inited;
+	bool                           committed_count_inited;
 	Atomic_counter<ib_int64_t>     committed_count;
-	Atomic_counter<ib_int64_t>     uncommitted_count;
 
 private:
 	/** Count of how many handles are opened to this table. Dropping of the

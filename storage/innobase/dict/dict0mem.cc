@@ -1199,7 +1199,7 @@ inline void dict_index_t::reconstruct_fields()
 }
 
 /** Deserialise metadata BLOB and reconstruct dropped or reordered columns,
-committed count and uncommitted count.
+committed count.
 @param[in]	metadata	data from serialise_mblob()
 @param[in]	len		length of the metadata, in bytes
 @return whether parsing the metadata failed */
@@ -1263,12 +1263,9 @@ bool dict_table_t::deserialise_mblob(const byte* metadata, ulint len)
 
 	UT_LIST_GET_FIRST(indexes)->reconstruct_fields();
 
-	counts_inited = (20 + num_non_pk_fields * 2 == len);
-	if (counts_inited) {
+	committed_count_inited = (12 + num_non_pk_fields * 2 == len);
+	if (committed_count_inited) {
 		committed_count = mach_read_from_8(metadata);
-		metadata += 8;
-
-		uncommitted_count = mach_read_from_8(metadata);
 		metadata += 8;
 	}
 	return false;

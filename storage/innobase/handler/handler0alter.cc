@@ -5511,7 +5511,7 @@ innobase_drop_virtual_try(
 }
 
 /** Serialise metadata BLOB, consisting of dropped or reordered columns,
-committed count and uncommitted count.
+committed count.
 @param[in,out]	heap	memory heap for allocation
 @param[out]	field	data field with the metadata */
 inline
@@ -5522,7 +5522,7 @@ void dict_table_t::serialise_mblob(mem_heap_t* heap, dfield_t* field) const
 	unsigned n_fixed = index.first_user_field();
 	unsigned num_non_pk_fields = index.n_fields - n_fixed;
 
-	ulint len = counts_inited ? 20 + num_non_pk_fields * 2 :
+	ulint len = committed_count_inited ? 12 + num_non_pk_fields * 2 :
 		4 + num_non_pk_fields * 2;
 
 	byte* data = static_cast<byte*>(mem_heap_alloc(heap, len));
@@ -5538,11 +5538,8 @@ void dict_table_t::serialise_mblob(mem_heap_t* heap, dfield_t* field) const
 		data += 2;
 	}
 
-	if (counts_inited) {
+	if (committed_count_inited) {
 		mach_write_to_8(data, index.table->committed_count);
-		data += 8;
-
-		mach_write_to_8(data, index.table->uncommitted_count);
 		data += 8;
 	}
 }
