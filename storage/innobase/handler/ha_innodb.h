@@ -190,6 +190,8 @@ public:
 		key_range*		min_key,
 		key_range*		max_key);
 
+	int init_committed_count();
+
 	ha_rows records();
 
 	ha_rows estimate_rows_upper_bound();

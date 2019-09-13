@@ -13307,6 +13307,33 @@ ha_innobase::rename_table(
 
 	DBUG_RETURN(convert_error_code_to_mysql(error, 0, NULL));
 }
+/********************************************************************//**
+Initialize committed count within dict_table_T
+@return 0 or error code
+*/
+int
+ha_innobase::init_committed_count()
+{
+	dict_table_t* ib_table = m_prebuilt->table;
+	uchar* buf = m_prebuilt->m_mysql_table->record[0];
+	trx_t* trx = m_prebuilt->trx;
+	int err;
+
+	if (ib_table->committed_count_inited)
+		return -1;  /* Already initialized */
+
+	ib_table->committed_count = 0;
+	rnd_init(true);
+	do {
+		err = rnd_next(buf);
+		if (!err)
+			ib_table->committed_count++;
+	} while (!err);
+	ib_table->committed_count -= trx->uncommitted_count(ib_table);
+
+	ib_table->committed_count_inited = true;
+	return 0;
+}
 
 /*********************************************************************//**
 If committed count is initialized, returns exact number of records;

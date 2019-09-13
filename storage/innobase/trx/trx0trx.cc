@@ -2444,22 +2444,21 @@ ib_int64_t trx_t::uncommitted_count(dict_table_t* table)
 
 	undo = rsegs.m_redo.undo;
 
-	mtr_start(&mtr);
-
-	undo_rec = trx_undo_get_first_rec(
-		undo->rseg->space, undo->hdr_page_no, undo->hdr_offset,
-		RW_S_LATCH, &mtr);
-	count += get_diff_from_rec(undo_rec, table->id);
-
-	mtr_commit(&mtr);
-
-	while (undo_rec) {
+	if (undo) {
 		mtr_start(&mtr);
 
-		undo_rec = trx_undo_get_next_rec(undo_rec, undo->hdr_page_no,
-			undo->hdr_offset, &mtr);
-		count += get_diff_from_rec(undo_rec, table->id);
+		undo_rec = trx_undo_get_first_rec(
+			undo->rseg->space, undo->hdr_page_no, undo->hdr_offset,
+			RW_S_LATCH, &mtr);
 
+		while (undo_rec) {
+			count += get_diff_from_rec(undo_rec, table->id);
+			mtr_commit(&mtr);
+
+			mtr_start(&mtr);
+			undo_rec = trx_undo_get_next_rec(undo_rec, undo->hdr_page_no,
+				undo->hdr_offset, &mtr);
+		}
 		mtr_commit(&mtr);
 	}
 
