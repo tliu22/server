@@ -5515,12 +5515,14 @@ committed count.
 @param[in,out]	heap	memory heap for allocation
 @param[out]	field	data field with the metadata */
 inline
-void dict_table_t::serialise_mblob(mem_heap_t* heap, dfield_t* field) const
+void dict_table_t::serialise_mblob(mem_heap_t* heap, dfield_t* field)
 {
 	DBUG_ASSERT(instant);
 	const dict_index_t& index = *UT_LIST_GET_FIRST(indexes);
 	unsigned n_fixed = index.first_user_field();
 	unsigned num_non_pk_fields = index.n_fields - n_fixed;
+
+	mutex_enter(&committed_count_mutex);
 
 	ulint len = committed_count_inited ? 12 + num_non_pk_fields * 2 :
 		4 + num_non_pk_fields * 2;
@@ -5542,6 +5544,8 @@ void dict_table_t::serialise_mblob(mem_heap_t* heap, dfield_t* field) const
 		mach_write_to_8(data, index.table->committed_count);
 		data += 8;
 	}
+
+	mutex_exit(&committed_count_mutex);
 }
 
 /** Construct the metadata record for instant ALTER TABLE.

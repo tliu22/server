@@ -6235,6 +6235,11 @@ no_such_table:
 		ut_ad(table->versioned() == m_prebuilt->table->versioned());
 	}
 
+	/* Don't need to acquire ib_table->committed_count_mutex since
+	table is just being opened */
+	if (ib_table->committed_count_inited)
+		m_int_table_flags |= HA_STATS_RECORDS_IS_EXACT;
+
 	info(HA_STATUS_NO_LOCK | HA_STATUS_VARIABLE | HA_STATUS_CONST | HA_STATUS_OPEN);
 	DBUG_RETURN(0);
 }
@@ -13308,7 +13313,7 @@ ha_innobase::rename_table(
 	DBUG_RETURN(convert_error_code_to_mysql(error, 0, NULL));
 }
 /********************************************************************//**
-Initialize committed count within dict_table_T
+Initialize committed count within dict_table_t
 @return 0 or error code
 */
 int
@@ -13319,7 +13324,10 @@ ha_innobase::init_committed_count()
 	trx_t* trx = m_prebuilt->trx;
 	int err;
 
+	mutex_enter(&ib_table->committed_count_mutex);
+
 	if (ib_table->committed_count_inited)
+		mutex_exit(&ib_table->committed_count_mutex);
 		return -1;  /* Already initialized */
 
 	ib_table->committed_count = 0;
@@ -13332,6 +13340,8 @@ ha_innobase::init_committed_count()
 	ib_table->committed_count -= trx->uncommitted_count(ib_table);
 
 	ib_table->committed_count_inited = true;
+
+	mutex_exit(&ib_table->committed_count_mutex);
 	return 0;
 }
 
@@ -13344,7 +13354,12 @@ ha_rows
 ha_innobase::records()
 {	
 	dict_table_t* ib_table = m_prebuilt->table;
-	if (ib_table->committed_count_inited) {
+
+	mutex_enter(&ib_table->committed_count_mutex);
+	bool committed_count_inited = ib_table->committed_count_inited;
+	mutex_exit(&ib_table->committed_count_mutex);
+
+	if (committed_count_inited) {
 		trx_t* trx = m_prebuilt->trx;
 		if (trx->isolation_level >= TRX_ISO_READ_COMMITTED) {
 			return ib_table->committed_count + trx->uncommitted_count(ib_table);
