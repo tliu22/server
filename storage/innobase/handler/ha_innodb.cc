@@ -13326,9 +13326,10 @@ ha_innobase::init_committed_count()
 
 	mutex_enter(&ib_table->committed_count_mutex);
 
-	if (ib_table->committed_count_inited)
+	if (ib_table->committed_count_inited) {
 		mutex_exit(&ib_table->committed_count_mutex);
 		return -1;  /* Already initialized */
+	}
 
 	ib_table->committed_count = 0;
 	rnd_init(true);
