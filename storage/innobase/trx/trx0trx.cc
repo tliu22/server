@@ -2453,9 +2453,6 @@ ib_int64_t trx_t::uncommitted_count(dict_table_t* table)
 
 		while (undo_rec) {
 			count += get_diff_from_rec(undo_rec, table->id);
-			mtr_commit(&mtr);
-
-			mtr_start(&mtr);
 			undo_rec = trx_undo_get_next_rec(undo_rec, undo->hdr_page_no,
 				undo->hdr_offset, &mtr);
 		}

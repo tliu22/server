@@ -321,7 +321,7 @@ int opt_sum_query(THD *thd,
         tl->table->file->print_error(error, MYF(ME_FATAL));
         DBUG_RETURN(error);
       }
-      count*= tl->table->file->stats.records;
+      count*= tl->table->file->records();
     }
   }
 
