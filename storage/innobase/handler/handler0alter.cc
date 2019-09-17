@@ -11382,6 +11382,7 @@ foreign_fail:
 
 	/* TODO: Also perform DROP TABLE and DROP INDEX after
 	the MDL downgrade. */
+	init_committed_count();
 
 #ifndef DBUG_OFF
 	dict_index_t* clust_index = dict_table_get_first_index(

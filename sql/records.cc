@@ -471,12 +471,14 @@ static int rr_index_desc(READ_RECORD *info)
 }
 
 
-int rr_sequential(READ_RECORD *info)
+int 
+rr_sequential(READ_RECORD *info)
 {
   int tmp;
   while ((tmp= info->table->file->ha_rnd_next(info->record())))
   {
     tmp= rr_handle_error(info, tmp);
+    info->table->file->records();
     break;
   }
   return tmp;
