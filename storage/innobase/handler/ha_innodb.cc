@@ -13316,6 +13316,7 @@ ha_innobase::rename_table(
 Initialize committed count within dict_table_t
 @return 0 or error code
 */
+
 int
 ha_innobase::init_committed_count()
 {
@@ -13345,7 +13346,22 @@ ha_innobase::init_committed_count()
 	mutex_exit(&ib_table->committed_count_mutex);
 	return 0;
 }
+/********************************************************************//**
+De-initialize committed count within dict_table_t
+@return 0 or error code
+*/
 
+int
+ha_innobase::deinit_committed_count()
+{
+	dict_table_t* ib_table = m_prebuilt->table;
+
+	mutex_enter(&ib_table->committed_count_mutex);
+	ib_table->committed_count_inited = false;
+	mutex_exit(&ib_table->committed_count_mutex);
+
+	return 0;
+}
 /*********************************************************************//**
 If committed count is initialized, returns exact number of records;
 otherwise returns an estimate of index records

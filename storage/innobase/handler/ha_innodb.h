@@ -191,6 +191,7 @@ public:
 		key_range*		max_key);
 
 	int init_committed_count();
+	int deinit_committed_count();
 
 	ha_rows records();
 

@@ -123,7 +123,8 @@ static const alter_table_operations INNOBASE_ALTER_NOCREATE
 /** Operations that InnoDB cares about and can perform without rebuild */
 static const alter_table_operations INNOBASE_ALTER_NOREBUILD
 	= INNOBASE_ONLINE_CREATE
-	| INNOBASE_ALTER_NOCREATE;
+	| INNOBASE_ALTER_NOCREATE
+	| ALTER_PERSISTENT_COUNT_ONOFF;
 
 /** Operations that can be performed instantly, without inplace_alter_table() */
 static const alter_table_operations INNOBASE_ALTER_INSTANT
@@ -8296,6 +8297,19 @@ ha_innobase::inplace_alter_table(
 	DEBUG_SYNC(m_user_thd, "innodb_inplace_alter_table_enter");
 
 	if (!(ha_alter_info->handler_flags & INNOBASE_ALTER_DATA)) {
+		if (ha_alter_info->handler_flags & ALTER_PERSISTENT_COUNT_ONOFF) {
+			switch (ha_alter_info->alter_info->persistent_count_onoff) {
+				case Alter_info::ENABLE:
+					init_committed_count();
+					break;
+				case Alter_info::DISABLE:
+					deinit_committed_count();
+					break;
+				case Alter_info::LEAVE_AS_IS:
+				default:
+					break;
+			}
+		}
 ok_exit:
 		DEBUG_SYNC(m_user_thd, "innodb_after_inplace_alter_table");
 		DBUG_RETURN(false);
@@ -11382,7 +11396,6 @@ foreign_fail:
 
 	/* TODO: Also perform DROP TABLE and DROP INDEX after
 	the MDL downgrade. */
-	init_committed_count();
 
 #ifndef DBUG_OFF
 	dict_index_t* clust_index = dict_table_get_first_index(

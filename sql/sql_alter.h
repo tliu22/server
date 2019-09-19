@@ -100,6 +100,8 @@ public:
   ulong                         partition_flags;
   // Enable or disable keys.
   enum_enable_or_disable        keys_onoff;
+  // Enable or disable persistent count.
+  enum_enable_or_disable        persistent_count_onoff;
   // List of partitions.
   List<const char>              partition_names;
   // Number of partitions.
