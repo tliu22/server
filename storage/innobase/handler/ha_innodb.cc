@@ -6237,8 +6237,9 @@ no_such_table:
 
 	/* Don't need to acquire ib_table->committed_count_mutex since
 	table is just being opened */
-	if (ib_table->committed_count_inited)
+	if (ib_table->committed_count_inited) {
 		m_int_table_flags |= HA_STATS_RECORDS_IS_EXACT;
+	}
 
 	info(HA_STATUS_NO_LOCK | HA_STATUS_VARIABLE | HA_STATUS_CONST | HA_STATUS_OPEN);
 	DBUG_RETURN(0);
@@ -13316,6 +13317,7 @@ ha_innobase::rename_table(
 Initialize committed count within dict_table_t
 @return 0 or error code
 */
+
 int
 ha_innobase::init_committed_count()
 {
@@ -13339,13 +13341,32 @@ ha_innobase::init_committed_count()
 			ib_table->committed_count++;
 	} while (!err);
 	ib_table->committed_count -= trx->uncommitted_count(ib_table);
-
 	ib_table->committed_count_inited = true;
 
 	mutex_exit(&ib_table->committed_count_mutex);
+
+	m_int_table_flags |= HA_STATS_RECORDS_IS_EXACT;
+
 	return 0;
 }
+/********************************************************************//**
+De-initialize committed count within dict_table_t
+@return 0 or error code
+*/
 
+int
+ha_innobase::deinit_committed_count()
+{
+	dict_table_t* ib_table = m_prebuilt->table;
+
+	mutex_enter(&ib_table->committed_count_mutex);
+	ib_table->committed_count_inited = false;
+	mutex_exit(&ib_table->committed_count_mutex);
+
+	m_int_table_flags &= ~HA_STATS_RECORDS_IS_EXACT;
+
+	return 0;
+}
 /*********************************************************************//**
 If committed count is initialized, returns exact number of records;
 otherwise returns an estimate of index records

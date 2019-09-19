@@ -2184,7 +2184,8 @@ inline bool dict_index_t::is_instant() const
 	ut_ad(!table->instant || !table->is_temporary());
 
 	return n_core_fields != n_fields
-		|| (is_primary() && table->instant);
+		|| (is_primary() && table->instant)
+		|| table->committed_count_inited;
 }
 
 inline bool dict_index_t::is_corrupted() const

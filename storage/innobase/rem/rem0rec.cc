@@ -1135,16 +1135,20 @@ rec_get_converted_size_comp_prefix_low(
 		ut_ad(index->is_instant());
 		ut_ad(status == REC_STATUS_INSTANT);
 		ut_ad(n_fields == ulint(index->n_fields) + 1);
-		extra_size += UT_BITS_IN_BYTES(index->n_nullable)
-			+ rec_get_n_add_field_len(n_fields - 1
+		extra_size += UT_BITS_IN_BYTES(index->n_nullable);
+		if (n_fields > index->n_core_fields) {
+			extra_size += rec_get_n_add_field_len(n_fields - 1
 						  - index->n_core_fields);
+		}
 	} else if (status == REC_STATUS_INSTANT
 		   && (!temp || n_fields > index->n_core_fields)) {
 		ut_ad(index->is_instant());
 		ut_ad(UT_BITS_IN_BYTES(n_null) >= index->n_core_null_bytes);
-		extra_size += UT_BITS_IN_BYTES(index->get_n_nullable(n_fields))
-			+ rec_get_n_add_field_len(n_fields - 1
+		extra_size += UT_BITS_IN_BYTES(index->get_n_nullable(n_fields));
+		if (n_fields > index->n_core_fields) {
+			extra_size += rec_get_n_add_field_len(n_fields - 1
 						  - index->n_core_fields);
+		}
 	} else {
 		ut_ad(n_fields <= index->n_core_fields);
 		extra_size += index->n_core_null_bytes;
@@ -1532,8 +1536,9 @@ rec_convert_dtuple_to_rec_comp(
 		ut_ad(index->is_instant());
 		ut_ad(status == REC_STATUS_INSTANT);
 		ut_ad(n_fields == ulint(index->n_fields) + 1);
-		rec_set_n_add_field(nulls, n_fields - 1
-				    - index->n_core_fields);
+		if (n_fields > index->n_core_fields) {
+			rec_set_n_add_field(nulls, n_fields - 1 - index->n_core_fields);
+		}
 		rec_set_heap_no_new(rec, PAGE_HEAP_NO_USER_LOW);
 		rec_set_status(rec, REC_STATUS_INSTANT);
 		n_node_ptr_field = ULINT_UNDEFINED;
@@ -1543,9 +1548,10 @@ rec_convert_dtuple_to_rec_comp(
 	switch (status) {
 	case REC_STATUS_INSTANT:
 		ut_ad(index->is_instant());
-		ut_ad(n_fields > index->n_core_fields);
-		rec_set_n_add_field(nulls, n_fields - 1
-				    - index->n_core_fields);
+		ut_ad(n_fields >= index->n_core_fields);
+		if (n_fields > index->n_core_fields) {
+			rec_set_n_add_field(nulls, n_fields - 1 - index->n_core_fields);
+		}
 		/* fall through */
 	case REC_STATUS_ORDINARY:
 		ut_ad(n_fields <= dict_index_get_n_fields(index));

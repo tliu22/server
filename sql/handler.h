@@ -756,7 +756,8 @@ typedef ulonglong alter_table_operations;
    Change in index length such that it doesn't require index rebuild.
 */
 #define ALTER_COLUMN_INDEX_LENGTH            (1ULL << 60)
-
+// Set for DISABLE PERSISTENT_COUNT | ENABLE PERSISTENT_COUNT
+#define ALTER_PERSISTENT_COUNT_ONOFF      (1ULL << 61)
 /*
   Flags set in partition_flags when altering partitions
 */
