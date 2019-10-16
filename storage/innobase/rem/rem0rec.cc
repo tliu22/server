@@ -341,7 +341,9 @@ ordinary:
 		ut_ad(index->is_instant());
 		/* fall through */
 	case REC_LEAF_TEMP_INSTANT:
-		n_fields = n_core + rec_get_n_add_field(nulls) + 1;
+		if (!index->table->alter_persistent_count) {
+			n_fields = n_core + rec_get_n_add_field(nulls) + 1;
+		}
 		ut_ad(n_fields <= index->n_fields);
 		const ulint n_nullable = index->get_n_nullable(n_fields);
 		const ulint n_null_bytes = UT_BITS_IN_BYTES(n_nullable);
@@ -1558,10 +1560,11 @@ rec_convert_dtuple_to_rec_comp(
 		if (!temp) {
 			rec_set_heap_no_new(rec, PAGE_HEAP_NO_USER_LOW);
 
-			rec_set_status(
+			rec_set_status(rec, status);
+			/*rec_set_status(
 				rec, n_fields == index->n_core_fields
 				     ? REC_STATUS_ORDINARY
-				     : REC_STATUS_INSTANT);
+				     : REC_STATUS_INSTANT);*/
 		}
 
 		if (dict_table_is_comp(index->table)) {

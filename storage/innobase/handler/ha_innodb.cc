@@ -13319,7 +13319,7 @@ Initialize committed count within dict_table_t
 */
 
 int
-ha_innobase::init_committed_count()
+ha_innobase::enable_persistent_count()
 {
 	dict_table_t* ib_table = m_prebuilt->table;
 	uchar* buf = m_prebuilt->m_mysql_table->record[0];
@@ -13355,7 +13355,7 @@ De-initialize committed count within dict_table_t
 */
 
 int
-ha_innobase::deinit_committed_count()
+ha_innobase::disable_persistent_count()
 {
 	dict_table_t* ib_table = m_prebuilt->table;
 

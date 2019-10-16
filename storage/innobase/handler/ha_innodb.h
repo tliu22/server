@@ -190,8 +190,8 @@ public:
 		key_range*		min_key,
 		key_range*		max_key);
 
-	int init_committed_count();
-	int deinit_committed_count();
+	int enable_persistent_count();
+	int disable_persistent_count();
 
 	ha_rows records();
 
