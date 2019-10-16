@@ -13346,6 +13346,7 @@ ha_innobase::enable_persistent_count()
 	mutex_exit(&ib_table->committed_count_mutex);
 
 	m_int_table_flags |= HA_STATS_RECORDS_IS_EXACT;
+	cached_table_flags = table_flags();
 
 	return 0;
 }
@@ -13364,6 +13365,7 @@ ha_innobase::disable_persistent_count()
 	mutex_exit(&ib_table->committed_count_mutex);
 
 	m_int_table_flags &= ~HA_STATS_RECORDS_IS_EXACT;
+	cached_table_flags = table_flags();
 
 	return 0;
 }
@@ -13375,19 +13377,21 @@ otherwise returns an estimate of index records
 ha_rows
 ha_innobase::records()
 {	
-	dict_table_t* ib_table = m_prebuilt->table;
+    trx_t* trx = m_prebuilt->trx;
+    if (trx->isolation_level == TRX_ISO_READ_COMMITTED) {
+        dict_table_t* ib_table = m_prebuilt->table;
 
-	mutex_enter(&ib_table->committed_count_mutex);
-	bool committed_count_inited = ib_table->committed_count_inited;
-	mutex_exit(&ib_table->committed_count_mutex);
+        mutex_enter(&ib_table->committed_count_mutex);
+        bool committed_count_inited = ib_table->committed_count_inited;
+        mutex_exit(&ib_table->committed_count_mutex);
 
-	if (committed_count_inited) {
-		trx_t* trx = m_prebuilt->trx;
-		if (trx->isolation_level >= TRX_ISO_READ_COMMITTED) {
-			return ib_table->committed_count + trx->uncommitted_count(ib_table);
-		}
-	}
-	return stats.records;
+        if (committed_count_inited) {
+            return ib_table->committed_count
+                + trx->uncommitted_count(ib_table);
+        }
+    }
+
+    return stats.records;
 }
 
 /*********************************************************************//**

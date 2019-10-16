@@ -1718,7 +1718,8 @@ struct dict_table_t {
 					1 + first changed column position */
 	inline void prepare_instant(const dict_table_t& old,
 				    const ulint* col_map,
-				    unsigned& first_alter_pos);
+				    unsigned& first_alter_pos,
+                    bool alter_persistent_count);
 
 	/** Adjust table metadata for instant ADD/DROP/reorder COLUMN.
 	@param[in]	table	table on which prepare_instant() was invoked

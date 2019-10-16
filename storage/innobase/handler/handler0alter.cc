@@ -224,7 +224,8 @@ inline void dict_table_t::init_instant(const dict_table_t& table)
 @param[out]	first_alter_pos	0, or 1 + first changed column position */
 inline void dict_table_t::prepare_instant(const dict_table_t& old,
 					  const ulint* col_map,
-					  unsigned& first_alter_pos)
+					  unsigned& first_alter_pos,
+                      bool alter_persistent_count)
 {
 	DBUG_ASSERT(!is_instant());
 	DBUG_ASSERT(n_dropped() == 0);
@@ -248,6 +249,10 @@ inline void dict_table_t::prepare_instant(const dict_table_t& old,
 	/* Protect oindex.n_core_fields and others, so that
 	purge cannot invoke dict_index_t::clear_instant_alter(). */
 	instant_metadata_lock(oindex, mtr);
+
+	if (alter_persistent_count) {
+		goto add_metadata;
+	}
 
 	for (unsigned i = 0; i + DATA_N_SYS_COLS < old.n_cols; i++) {
 		if (col_map[i] != i) {
@@ -1056,7 +1061,7 @@ struct ha_innobase_inplace_ctx : public inplace_alter_handler_ctx
 	}
 
 	/** Convert table-rebuilding ALTER to instant ALTER. */
-	void prepare_instant()
+	void prepare_instant(bool alter_persistent_count)
 	{
 		DBUG_ASSERT(need_rebuild());
 		DBUG_ASSERT(!is_instant());
@@ -1064,10 +1069,14 @@ struct ha_innobase_inplace_ctx : public inplace_alter_handler_ctx
 
 		instant_table = new_table;
 		new_table = old_table;
-		export_vars.innodb_instant_alter_column++;
+
+		if  (!alter_persistent_count) {
+			export_vars.innodb_instant_alter_column++;
+		}
 
 		instant_table->prepare_instant(*old_table, col_map,
-					       first_alter_pos);
+                                       first_alter_pos,
+                                       alter_persistent_count);
 	}
 
 	/** Adjust table metadata for instant ADD/DROP/reorder COLUMN.
@@ -1467,7 +1476,7 @@ check_v_col_in_order(
 	return(true);
 }
 
-/** Determine if an instant operation is possible for altering columns.
+/** Determine if an instant operation is possible for an ALTER.
 @param[in]	ib_table	InnoDB table definition
 @param[in]	ha_alter_info	the ALTER TABLE operation
 @param[in]	table		table definition before ALTER TABLE
@@ -1475,7 +1484,7 @@ check_v_col_in_order(
 @param[in]	strict		whether to ensure that user records fit */
 static
 bool
-instant_alter_column_possible(
+instant_alter_possible(
 	const dict_table_t&		ib_table,
 	const Alter_inplace_info*	ha_alter_info,
 	const TABLE*			table,
@@ -1485,6 +1494,10 @@ instant_alter_column_possible(
 	const dict_index_t* const pk = ib_table.indexes.start;
 	ut_ad(pk->is_primary());
 	ut_ad(!pk->has_virtual());
+
+	if (ha_alter_info->handler_flags & ALTER_PERSISTENT_COUNT_ONOFF) {
+		return true;
+	}
 
 	if (ha_alter_info->handler_flags
 	    & (ALTER_STORED_COLUMN_ORDER | ALTER_DROP_STORED_COLUMN
@@ -2342,7 +2355,7 @@ next_column:
 		af++;
 	}
 
-	const bool supports_instant = instant_alter_column_possible(
+	const bool supports_instant = instant_alter_possible(
 		*m_prebuilt->table, ha_alter_info, table, altered_table,
 		trx_is_strict(m_prebuilt->trx));
 	if (add_drop_v_cols) {
@@ -6573,7 +6586,7 @@ new_clustered_failed:
 	DBUG_ASSERT(!ctx->need_rebuild()
 		    || !ctx->new_table->persistent_autoinc);
 
-	if (ctx->need_rebuild() && instant_alter_column_possible(
+	if (ctx->need_rebuild() && instant_alter_possible(
 		    *user_table, ha_alter_info, old_table, altered_table,
 		    trx_is_strict(ctx->trx))) {
 		for (uint a = 0; a < ctx->num_to_add_index; a++) {
@@ -6703,7 +6716,8 @@ new_clustered_failed:
 				= ctx->old_table->persistent_autoinc;
 		}
 
-		ctx->prepare_instant();
+		ctx->prepare_instant(!!(ha_alter_info->handler_flags
+                                & ALTER_PERSISTENT_COUNT_ONOFF));
 	}
 
 	if (ctx->need_rebuild()) {
@@ -8023,10 +8037,10 @@ err_exit:
 
 	if (!(ha_alter_info->handler_flags & INNOBASE_ALTER_DATA)
 	    || ((ha_alter_info->handler_flags & ~(INNOBASE_INPLACE_IGNORE
-											  | INNOBASE_ALTER_NOCREATE
-											  | INNOBASE_ALTER_INSTANT))
-			== ALTER_OPTIONS
-			&& !alter_options_need_rebuild(ha_alter_info, table))) {
+                                              | INNOBASE_ALTER_NOCREATE
+                                              | INNOBASE_ALTER_INSTANT))
+            == ALTER_OPTIONS
+            && !alter_options_need_rebuild(ha_alter_info, table))) {
 
 		if (heap) {
 			ha_alter_info->handler_ctx
@@ -10469,24 +10483,22 @@ commit_cache_norebuild(
 	} else {
 		ut_ad(ctx->col_map);
 
-		if (ctx->col_map) {
-			if (fts_t* fts = ctx->new_table->fts) {
-				ut_ad(fts->doc_col != ULINT_UNDEFINED);
-				ut_ad(ctx->new_table->n_cols > DATA_N_SYS_COLS);
-				const ulint c = ctx->col_map[fts->doc_col];
-				ut_ad(c < ulint(ctx->new_table->n_cols)
-					- DATA_N_SYS_COLS);
-				ut_d(const dict_col_t& col = ctx->new_table->cols[c]);
-				ut_ad(!col.is_nullable());
-				ut_ad(!col.is_virtual());
-				ut_ad(!col.is_added());
-				ut_ad(col.prtype & DATA_UNSIGNED);
-				ut_ad(col.mtype == DATA_INT);
-				ut_ad(col.len == 8);
-				ut_ad(col.ord_part);
-				fts->doc_col = c;
-			}
-		}
+        if (fts_t* fts = ctx->new_table->fts) {
+            ut_ad(fts->doc_col != ULINT_UNDEFINED);
+            ut_ad(ctx->new_table->n_cols > DATA_N_SYS_COLS);
+            const ulint c = ctx->col_map[fts->doc_col];
+            ut_ad(c < ulint(ctx->new_table->n_cols)
+                - DATA_N_SYS_COLS);
+            ut_d(const dict_col_t& col = ctx->new_table->cols[c]);
+            ut_ad(!col.is_nullable());
+            ut_ad(!col.is_virtual());
+            ut_ad(!col.is_added());
+            ut_ad(col.prtype & DATA_UNSIGNED);
+            ut_ad(col.mtype == DATA_INT);
+            ut_ad(col.len == 8);
+            ut_ad(col.ord_part);
+            fts->doc_col = c;
+        }
 
 		if (ha_alter_info->handler_flags & ALTER_DROP_STORED_COLUMN) {
 			const dict_index_t* index = ctx->new_table->indexes.start;
