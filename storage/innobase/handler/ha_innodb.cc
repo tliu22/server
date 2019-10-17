@@ -4262,7 +4262,7 @@ innobase_commit_low(
 #endif /* WITH_WSREP */
 	if (trx_is_started(trx)) {
 
-		trx_commit_for_mysql(trx);
+        trx_commit_for_mysql(trx);
 	}
 	trx->will_lock = 0;
 #ifdef WITH_WSREP
@@ -13337,8 +13337,9 @@ ha_innobase::enable_persistent_count()
 	rnd_init(true);
 	do {
 		err = rnd_next(buf);
-		if (!err)
-			ib_table->committed_count++;
+		if (!err) {
+            ib_table->committed_count++;
+        }
 	} while (!err);
 	ib_table->committed_count -= trx->uncommitted_count(ib_table);
 	ib_table->committed_count_inited = true;

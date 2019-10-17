@@ -25,6 +25,7 @@ Created 3/26/1996 Heikki Tuuri
 *******************************************************/
 
 #include "trx0trx.h"
+#include <sql_class.h>
 
 #ifdef WITH_WSREP
 #include <mysql/service_wsrep.h>
@@ -33,10 +34,12 @@ Created 3/26/1996 Heikki Tuuri
 #include <mysql/service_thd_error_context.h>
 
 #include "btr0sea.h"
+#include "ha_innodb.h"
 #include "lock0lock.h"
 #include "log0log.h"
 #include "os0proc.h"
 #include "que0que.h"
+#include "row0mysql.h"
 #include "srv0mon.h"
 #include "srv0srv.h"
 #include "srv0start.h"
@@ -1469,6 +1472,43 @@ trx_commit_in_memory(
 	}
 }
 
+/*************************************************************//**
+Update the persistent counts of all tables modified by a transaction. */
+void trx_update_persistent_counts(
+/*============*/
+    trx_t* trx)		/*!< in: transaction */
+{
+    dict_table_t* ib_table;
+    TABLE* table;
+    bool committed_count_inited;
+    mem_heap_t* heap;
+    for (trx_mod_tables_t::const_iterator t = trx->mod_tables.begin();
+         t != trx->mod_tables.end(); t++) {
+        ib_table = t->first;
+
+        table = thd_get_open_tables(current_thd);
+        for (; table; table = table->next) {
+            if (ib_table == ((ha_innobase *) table->file)->m_prebuilt->table) {
+                break;
+            }
+        }
+
+        if (table) {
+            mutex_enter(&ib_table->committed_count_mutex);
+            committed_count_inited = ib_table->committed_count_inited;
+            mutex_exit(&ib_table->committed_count_mutex);
+
+            if (committed_count_inited) {
+                ib_table->committed_count += trx->uncommitted_count(ib_table);
+
+                heap = mem_heap_create(1024);
+                innobase_update_persistent_count(ib_table, table, heap, trx);
+                mem_heap_free(heap);
+            }
+        }
+    }
+}
+
 /** Commit a transaction and a mini-transaction.
 @param[in,out]	trx	transaction
 @param[in,out]	mtr	mini-transaction (NULL if no modifications) */
@@ -1553,6 +1593,7 @@ void trx_commit_low(trx_t* trx, mtr_t* mtr)
 	}
 #endif
 
+	trx_update_persistent_counts(trx);
 	trx_commit_in_memory(trx, mtr);
 }
 
@@ -2407,7 +2448,12 @@ trx_set_rw_mode(
 	}
 }
 
-ib_int64_t get_diff_from_rec(trx_undo_rec_t* undo_rec, table_id_t table_id)
+/*************************************************************//**
+Return difference in uncommitted count for a single undo record. */
+ib_int64_t get_diff_from_rec(
+/*============*/
+    trx_undo_rec_t* undo_rec,		/*!< in: undo record */
+    table_id_t table_id)           	/*!< in: table ID */
 {
 	ulint type, cmpl_info;
 	bool updated_extern;

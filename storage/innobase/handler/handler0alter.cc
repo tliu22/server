@@ -5986,6 +5986,284 @@ func_exit:
 	return false;
 }
 
+/** Insert or update SYS_COLUMNS and the hidden metadata record
+for instant ALTER TABLE.
+@param[in]  user_table  InnoDB table
+@param[in]	table		MySQL table
+@param[in]  heap        heap
+@param[in,out]	trx		dictionary transaction
+@retval	true	failure
+@retval	false	success */
+bool innobase_update_persistent_count(
+	dict_table_t* user_table,
+	const TABLE*  table,
+	mem_heap_t*	  heap,
+	trx_t*		  trx)
+{
+	dict_index_t* index = dict_table_get_first_index(user_table);
+	mtr_t mtr;
+	mtr.start();
+	/* Prevent purge from calling dict_index_t::clear_instant_alter(),
+	to protect index->n_core_fields, index->table->instant and others
+	from changing during instant_column(). */
+	instant_metadata_lock(*index, mtr);
+	const unsigned n_old_fields = index->n_fields;
+
+	ulint*	col_map = static_cast<ulint*>(mem_heap_alloc(
+							heap, size_t(user_table->n_cols) * sizeof(ulint)));
+	for (unsigned i = 0; i < user_table->n_cols; i++) {
+		col_map[i] = i;
+	}
+
+	const bool metadata_changed = user_table->instant_column(*user_table,
+															 col_map);
+
+	/* Release the page latch. Between this and the next
+	btr_pcur_open_at_index_side(), data fields such as
+	index->n_core_fields and index->table->instant could change,
+	but we would handle that in empty_table: below. */
+	mtr.commit();
+	/* The table may have been emptied and may have lost its
+	'instantness' during this ALTER TABLE. */
+
+	/* Construct a table row of default values for the stored columns. */
+	dtuple_t* row = dtuple_create(heap, user_table->n_cols);
+	dict_table_copy_types(row, user_table);
+	Field** af = table->field;
+	Field** const end = table->field + table->s->fields;
+
+	for (uint i = 0; af < end; af++) {
+		dfield_t* d = dtuple_get_nth_field(row, i);
+		const dict_col_t* col = dict_table_get_nth_col(user_table, i);
+		DBUG_ASSERT(!col->is_virtual());
+		DBUG_ASSERT(!col->is_dropped());
+		DBUG_ASSERT(col->mtype != DATA_SYS);
+		DBUG_ASSERT(!strcmp((*af)->field_name.str,
+				    dict_table_get_col_name(user_table, i)));
+
+		if (col->is_added()) {
+			dfield_set_data(d, col->def_val.data,
+					col->def_val.len);
+		} else if ((*af)->real_maybe_null()) {
+			/* Store NULL for nullable 'core' columns. */
+			dfield_set_null(d);
+		} else {
+			switch ((*af)->type()) {
+			case MYSQL_TYPE_VARCHAR:
+			case MYSQL_TYPE_GEOMETRY:
+			case MYSQL_TYPE_TINY_BLOB:
+			case MYSQL_TYPE_MEDIUM_BLOB:
+			case MYSQL_TYPE_BLOB:
+			case MYSQL_TYPE_LONG_BLOB:
+				/* Store the empty string for 'core'
+				variable-length NOT NULL columns. */
+				dfield_set_data(d, field_ref_zero, 0);
+				break;
+			default:
+				/* For fixed-length NOT NULL 'core' columns,
+				get a dummy default value from SQL. Note that
+				we will preserve the old values of these
+				columns when updating the metadata
+				record, to avoid unnecessary updates. */
+				ulint len = (*af)->pack_length();
+				DBUG_ASSERT(d->type.mtype != DATA_INT
+					    || len <= 8);
+				row_mysql_store_col_in_innobase_format(
+					d, d->type.mtype == DATA_INT
+					? static_cast<byte*>(
+						mem_heap_alloc(heap, len))
+					: NULL, true, (*af)->ptr, len,
+					dict_table_is_comp(user_table));
+			}
+		}
+
+		i++;
+	}
+
+	if (innodb_update_cols(user_table, dict_table_encode_n_col(
+				       unsigned(user_table->n_cols)
+				       - DATA_N_SYS_COLS,
+				       user_table->n_v_cols)
+			       | (user_table->flags & DICT_TF_COMPACT) << 31,
+			       trx)) {
+		return true;
+	}
+
+	unsigned i = unsigned(user_table->n_cols) - DATA_N_SYS_COLS;
+	DBUG_ASSERT(i >= table->s->stored_fields);
+	DBUG_ASSERT(i <= table->s->stored_fields + 1);
+	if (i > table->s->fields) {
+		const dict_col_t& fts_doc_id = user_table->cols[i - 1];
+		DBUG_ASSERT(!strcmp(fts_doc_id.name(*user_table),
+				    FTS_DOC_ID_COL_NAME));
+		DBUG_ASSERT(!fts_doc_id.is_nullable());
+		DBUG_ASSERT(fts_doc_id.len == 8);
+		dfield_set_data(dtuple_get_nth_field(row, i - 1),
+				field_ref_zero, fts_doc_id.len);
+	}
+	byte trx_id[DATA_TRX_ID_LEN], roll_ptr[DATA_ROLL_PTR_LEN];
+	dfield_set_data(dtuple_get_nth_field(row, i++), field_ref_zero,
+			DATA_ROW_ID_LEN);
+	dfield_set_data(dtuple_get_nth_field(row, i++), trx_id, sizeof trx_id);
+	dfield_set_data(dtuple_get_nth_field(row, i),roll_ptr,sizeof roll_ptr);
+	DBUG_ASSERT(i + 1 == user_table->n_cols);
+
+	trx_write_trx_id(trx_id, trx->id);
+	/* The DB_ROLL_PTR will be assigned later, when allocating undo log.
+	Silence a Valgrind warning in dtuple_validate() when
+	row_ins_clust_index_entry_low() searches for the insert position. */
+	memset(roll_ptr, 0, sizeof roll_ptr);
+
+	dtuple_t* entry = index->instant_metadata(*row, heap);
+	mtr.start();
+	index->set_modified(mtr);
+	btr_pcur_t pcur;
+	btr_pcur_open_at_index_side(true, index, BTR_MODIFY_TREE, &pcur, true,
+				    0, &mtr);
+	ut_ad(btr_pcur_is_before_first_on_page(&pcur));
+	btr_pcur_move_to_next_on_page(&pcur);
+
+	buf_block_t* block = btr_pcur_get_block(&pcur);
+	ut_ad(page_is_leaf(block->frame));
+	ut_ad(!page_has_prev(block->frame));
+	ut_ad(!buf_block_get_page_zip(block));
+	const rec_t* rec = btr_pcur_get_rec(&pcur);
+	que_thr_t* thr = pars_complete_graph_for_exec(NULL, trx, heap, NULL);
+
+	dberr_t err = DB_SUCCESS;
+	if (rec_is_metadata(rec, *index)) {
+		ut_ad(page_rec_is_user_rec(rec));
+		if (!page_has_next(block->frame)
+		    && page_rec_is_last(rec, block->frame)) {
+			goto empty_table;
+		}
+
+		if (!metadata_changed) {
+			goto func_exit;
+		}
+
+		/* Ensure that the root page is in the correct format. */
+		buf_block_t* root = btr_root_block_get(index, RW_X_LATCH,
+						       &mtr);
+		DBUG_ASSERT(root);
+		DBUG_ASSERT(!root->page.encrypted);
+		if (fil_page_get_type(root->frame) != FIL_PAGE_TYPE_INSTANT) {
+			DBUG_ASSERT(!"wrong page type");
+			err = DB_CORRUPTION;
+			goto func_exit;
+		}
+
+		btr_set_instant(root, *index, &mtr);
+
+		/* Extend the record with any added columns. */
+		uint n = uint(index->n_fields) - n_old_fields;
+		/* Reserve room for DB_TRX_ID,DB_ROLL_PTR and any
+		non-updated off-page columns in case they are moved off
+		page as a result of the update. */
+		const unsigned f = user_table->instant != NULL;
+		upd_t* update = upd_create(index->n_fields + f, heap);
+		update->n_fields = n + f;
+		update->info_bits = f
+			? REC_INFO_METADATA_ALTER
+			: REC_INFO_METADATA_ADD;
+		if (f) {
+			upd_field_t* uf = upd_get_nth_field(update, 0);
+			uf->field_no = index->first_user_field();
+			uf->new_val = entry->fields[uf->field_no];
+			DBUG_ASSERT(!dfield_is_ext(&uf->new_val));
+			DBUG_ASSERT(!dfield_is_null(&uf->new_val));
+		}
+
+		/* Add the default values for instantly added columns */
+		unsigned j = f;
+
+		for (unsigned k = n_old_fields; k < index->n_fields; k++) {
+			upd_field_t* uf = upd_get_nth_field(update, j++);
+			uf->field_no = k + f;
+			uf->new_val = entry->fields[k + f];
+
+			ut_ad(j <= n + f);
+		}
+
+		ut_ad(j == n + f);
+
+		ulint* offsets = NULL;
+		mem_heap_t* offsets_heap = NULL;
+		big_rec_t* big_rec;
+		err = btr_cur_pessimistic_update(
+			BTR_NO_LOCKING_FLAG | BTR_KEEP_POS_FLAG,
+			btr_pcur_get_btr_cur(&pcur),
+			&offsets, &offsets_heap, heap,
+			&big_rec, update, UPD_NODE_NO_ORD_CHANGE,
+			thr, trx->id, &mtr);
+
+		offsets = rec_get_offsets(
+			btr_pcur_get_rec(&pcur), index, offsets,
+			true, ULINT_UNDEFINED, &offsets_heap);
+		if (big_rec) {
+			if (err == DB_SUCCESS) {
+				err = btr_store_big_rec_extern_fields(
+					&pcur, offsets, big_rec, &mtr,
+					BTR_STORE_UPDATE);
+			}
+
+			dtuple_big_rec_free(big_rec);
+		}
+		if (offsets_heap) {
+			mem_heap_free(offsets_heap);
+		}
+		btr_pcur_close(&pcur);
+		goto func_exit;
+	} else if (page_rec_is_supremum(rec)) {
+empty_table:
+		/* The table is empty. */
+		ut_ad(fil_page_index_page_check(block->frame));
+		ut_ad(!page_has_siblings(block->frame));
+		ut_ad(block->page.id.page_no() == index->page);
+		/* MDEV-17383: free metadata BLOBs! */
+		btr_page_empty(block, NULL, index, 0, &mtr);
+		index->clear_instant_alter();
+		goto func_exit;
+	} else if (!user_table->is_instant()) {
+		ut_ad(!user_table->not_redundant());
+		goto func_exit;
+	}
+
+	/* Convert the table to the instant ALTER TABLE format. */
+	mtr.commit();
+	mtr.start();
+	index->set_modified(mtr);
+	if (buf_block_t* root = btr_root_block_get(index, RW_SX_LATCH, &mtr)) {
+		if (root->page.encrypted
+		    || fil_page_get_type(root->frame) != FIL_PAGE_INDEX) {
+			DBUG_ASSERT(!"wrong page type");
+			goto err_exit;
+		}
+
+		btr_set_instant(root, *index, &mtr);
+		mtr.commit();
+		mtr.start();
+		index->set_modified(mtr);
+		err = row_ins_clust_index_entry_low(
+			BTR_NO_LOCKING_FLAG, BTR_MODIFY_TREE, index,
+			index->n_uniq, entry, 0, thr, false);
+	} else {
+err_exit:
+		err = DB_CORRUPTION;
+	}
+
+func_exit:
+	mtr.commit();
+
+	if (err != DB_SUCCESS) {
+		my_error_innodb(err, table->s->table_name.str,
+				user_table->flags);
+		return true;
+	}
+
+	return false;
+}
+
 /** Adjust the create index column number from "New table" to
 "old InnoDB table" while we are doing dropping virtual column. Since we do
 not create separate new table for the dropping/adding virtual columns.
