@@ -330,7 +330,10 @@ enum enum_alter_inplace_result {
 
 /* Support native hash index */
 #define HA_CAN_HASH_KEYS        (1ULL << 58)
-#define HA_LAST_TABLE_FLAG HA_CAN_HASH_KEYS
+
+/* Has persistent count enabled */
+#define HA_PERSISTENT_COUNT  (1ULL << 59)
+#define HA_LAST_TABLE_FLAG HA_PERSISTENT_COUNT
 
 /* bits in index_flags(index_number) for what you can do with index */
 #define HA_READ_NEXT            1       /* TODO really use this flag */

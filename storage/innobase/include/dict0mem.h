@@ -2132,6 +2132,7 @@ public:
 	It is protected by lock_sys.mutex. */
 	ulint					n_rec_locks;
 
+    bool                           alter_persistent_count;
 	/** Mutex for committed_count_inited accesses.*/
 	ib_mutex_t				       committed_count_mutex;
 	bool                           committed_count_inited;

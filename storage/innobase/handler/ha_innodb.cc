@@ -6238,7 +6238,7 @@ no_such_table:
 	/* Don't need to acquire ib_table->committed_count_mutex since
 	table is just being opened */
 	if (ib_table->committed_count_inited) {
-		m_int_table_flags |= HA_STATS_RECORDS_IS_EXACT;
+		m_int_table_flags |= HA_PERSISTENT_COUNT;
 	}
 
 	info(HA_STATUS_NO_LOCK | HA_STATUS_VARIABLE | HA_STATUS_CONST | HA_STATUS_OPEN);
@@ -13326,6 +13326,7 @@ ha_innobase::enable_persistent_count()
 	trx_t* trx = m_prebuilt->trx;
 	int err;
 
+	ib_table->alter_persistent_count = true;
 	mutex_enter(&ib_table->committed_count_mutex);
 
 	if (ib_table->committed_count_inited) {
@@ -13338,16 +13339,15 @@ ha_innobase::enable_persistent_count()
 	do {
 		err = rnd_next(buf);
 		if (!err) {
-            ib_table->committed_count++;
-        }
+			ib_table->committed_count++;
+		}
 	} while (!err);
 	ib_table->committed_count -= trx->uncommitted_count(ib_table);
 	ib_table->committed_count_inited = true;
+	m_int_table_flags |= HA_PERSISTENT_COUNT;
+	cached_table_flags = table_flags();
 
 	mutex_exit(&ib_table->committed_count_mutex);
-
-	m_int_table_flags |= HA_STATS_RECORDS_IS_EXACT;
-	cached_table_flags = table_flags();
 
 	return 0;
 }
@@ -13363,16 +13363,15 @@ ha_innobase::disable_persistent_count()
 
 	mutex_enter(&ib_table->committed_count_mutex);
 	ib_table->committed_count_inited = false;
-	mutex_exit(&ib_table->committed_count_mutex);
-
-	m_int_table_flags &= ~HA_STATS_RECORDS_IS_EXACT;
+	m_int_table_flags &= ~HA_PERSISTENT_COUNT;
 	cached_table_flags = table_flags();
+	mutex_exit(&ib_table->committed_count_mutex);
 
 	return 0;
 }
 /*********************************************************************//**
-If committed count is initialized, returns exact number of records;
-otherwise returns an estimate of index records
+If committed count is initialized and transaction is in READ COMMITTED mode,
+returns exact number of records; otherwise returns an estimate of index records
 @return number of rows */
 
 ha_rows

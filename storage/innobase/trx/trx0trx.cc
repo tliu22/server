@@ -1480,8 +1480,7 @@ void trx_update_persistent_counts(
 {
     dict_table_t* ib_table;
     TABLE* table;
-    bool committed_count_inited;
-    mem_heap_t* heap;
+    bool update_persistent_count;
     for (trx_mod_tables_t::const_iterator t = trx->mod_tables.begin();
          t != trx->mod_tables.end(); t++) {
         ib_table = t->first;
@@ -1495,16 +1494,15 @@ void trx_update_persistent_counts(
 
         if (table) {
             mutex_enter(&ib_table->committed_count_mutex);
-            committed_count_inited = ib_table->committed_count_inited;
+            update_persistent_count = ib_table->committed_count_inited 
+                && !ib_table->alter_persistent_count;
             mutex_exit(&ib_table->committed_count_mutex);
 
-            if (committed_count_inited) {
+            if (update_persistent_count) {
                 ib_table->committed_count += trx->uncommitted_count(ib_table);
-
-                heap = mem_heap_create(1024);
-                innobase_update_persistent_count(ib_table, table, heap, trx);
-                mem_heap_free(heap);
+                innobase_update_persistent_count(ib_table, table, trx);
             }
+            ib_table->alter_persistent_count = false;
         }
     }
 }
