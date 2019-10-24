@@ -25,7 +25,6 @@ Created 3/26/1996 Heikki Tuuri
 *******************************************************/
 
 #include "trx0trx.h"
-#include <sql_class.h>
 
 #ifdef WITH_WSREP
 #include <mysql/service_wsrep.h>
@@ -1546,6 +1545,8 @@ void trx_commit_low(trx_t* trx, mtr_t* mtr)
 	const bool debug_sync = trx->mysql_thd && trx->has_logged_persistent();
 #endif
 
+	trx_update_persistent_counts(trx);
+
 	if (mtr != NULL) {
 		trx_write_serialisation_history(trx, mtr);
 
@@ -1591,7 +1592,6 @@ void trx_commit_low(trx_t* trx, mtr_t* mtr)
 	}
 #endif
 
-	trx_update_persistent_counts(trx);
 	trx_commit_in_memory(trx, mtr);
 }
 

@@ -4262,7 +4262,7 @@ innobase_commit_low(
 #endif /* WITH_WSREP */
 	if (trx_is_started(trx)) {
 
-        trx_commit_for_mysql(trx);
+		trx_commit_for_mysql(trx);
 	}
 	trx->will_lock = 0;
 #ifdef WITH_WSREP

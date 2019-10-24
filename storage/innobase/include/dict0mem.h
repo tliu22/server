@@ -1719,7 +1719,7 @@ struct dict_table_t {
 	inline void prepare_instant(const dict_table_t& old,
 				    const ulint* col_map,
 				    unsigned& first_alter_pos,
-                    bool alter_persistent_count);
+				    bool alter_persistent_count);
 
 	/** Adjust table metadata for instant ADD/DROP/reorder COLUMN.
 	@param[in]	table	table on which prepare_instant() was invoked
@@ -2132,7 +2132,7 @@ public:
 	It is protected by lock_sys.mutex. */
 	ulint					n_rec_locks;
 
-    bool                           alter_persistent_count;
+	bool                           alter_persistent_count;
 	/** Mutex for committed_count_inited accesses.*/
 	ib_mutex_t				       committed_count_mutex;
 	bool                           committed_count_inited;

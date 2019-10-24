@@ -507,7 +507,7 @@ inline void dict_index_t::instant_add_field(const dict_index_t& instant)
 inline bool dict_table_t::instant_column(const dict_table_t& table,
 					 const ulint* col_map)
 {
-	//DBUG_ASSERT(!table.cached);
+	DBUG_ASSERT(!table.cached);
 	DBUG_ASSERT(table.n_def == table.n_cols);
 	DBUG_ASSERT(table.n_t_def == table.n_t_cols);
 	DBUG_ASSERT(n_def == n_cols);
@@ -638,7 +638,7 @@ inline bool dict_table_t::instant_column(const dict_table_t& table,
 		if (!instant) {
 			instant = new (mem_heap_zalloc(heap, sizeof *instant))
 				dict_instant_t();
-			goto dup_dropped;x
+			goto dup_dropped;
 		} else if (n_dropped() < table.n_dropped()) {
 dup_dropped:
 			instant->dropped = static_cast<dict_col_t*>(
@@ -5987,143 +5987,6 @@ func_exit:
 	return false;
 }
 
-dict_table_t* duplicate_dict_table(dict_table_t* ib_table, const TABLE* table, 
-                                   mem_heap_t* heap)
-{
-    ulint z = 0;
-    
-    dict_table_t* dup_ib_table = 
-        dict_mem_table_create(ib_table->name.m_name, NULL,
-                              ib_table->n_cols - DATA_N_SYS_COLS,
-                              ib_table->n_v_cols, ib_table->flags,
-                              ib_table->flags2);
-    
-    for (uint i = 0; i < table->s->fields; i++) {
-        const Field*	field = table->field[i];
-        ulint		is_unsigned;
-        ulint		field_type
-            = (ulint) field->type();
-        ulint		col_type
-            = get_innobase_type_from_mysql_type(
-                &is_unsigned, field);
-        ulint		charset_no;
-        ulint		col_len;
-        const bool	is_virtual = !field->stored_in_db();
-
-        /* we assume in dtype_form_prtype() that this
-        fits in two bytes */
-        ut_a(field_type <= MAX_CHAR_COLL_NUM);
-
-        if (!field->real_maybe_null()) {
-            field_type |= DATA_NOT_NULL;
-        }
-
-        if (field->binary()) {
-            field_type |= DATA_BINARY_TYPE;
-        }
-
-        if (is_unsigned) {
-            field_type |= DATA_UNSIGNED;
-        }
-
-        if (table->versioned()) {
-            if (i == table->s->vers.start_fieldno) {
-                field_type |= DATA_VERS_START;
-            } else if (i ==
-                    table->s->vers.end_fieldno) {
-                field_type |= DATA_VERS_END;
-            } else if (!(field->flags
-                        & VERS_UPDATE_UNVERSIONED_FLAG)) {
-                field_type |= DATA_VERSIONED;
-            }
-        }
-
-        if (dtype_is_string_type(col_type)) {
-            charset_no = (ulint) field->charset()->number;
-
-            if (charset_no > MAX_CHAR_COLL_NUM) {
-                my_error(ER_WRONG_KEY_COLUMN, MYF(0), "InnoDB",
-                        field->field_name.str);
-                goto dup_ib_table_failed;
-            }
-        } else {
-            charset_no = 0;
-        }
-
-        col_len = field->pack_length();
-
-        /* The MySQL pack length contains 1 or 2 bytes
-        length field for a true VARCHAR. Let us
-        subtract that, so that the InnoDB column
-        length in the InnoDB data dictionary is the
-        real maximum byte length of the actual data. */
-
-        if (field->type() == MYSQL_TYPE_VARCHAR) {
-            uint32	length_bytes
-                = static_cast<const Field_varstring*>(
-                    field)->length_bytes;
-
-            col_len -= length_bytes;
-
-            if (length_bytes == 2) {
-                field_type |= DATA_LONG_TRUE_VARCHAR;
-            }
-
-        }
-
-        if (dict_col_name_is_reserved(field->field_name.str)) {
-            dict_mem_table_free(dup_ib_table);
-            dup_ib_table = ib_table;
-            my_error(ER_WRONG_COLUMN_NAME, MYF(0),
-                    field->field_name.str);
-            goto dup_ib_table_failed;
-        }
-
-        if (is_virtual) {
-            dict_mem_table_add_v_col(
-                dup_ib_table, heap,
-                field->field_name.str,
-                col_type,
-                dtype_form_prtype(
-                    field_type, charset_no)
-                | DATA_VIRTUAL,
-                col_len, i, 0);
-        } else {
-            dict_mem_table_add_col(
-                dup_ib_table, heap,
-                field->field_name.str,
-                col_type,
-                dtype_form_prtype(
-                    field_type, charset_no),
-                col_len);
-        }
-    }
-
-    if (ib_table->n_v_cols) {
-        for (uint i = 0; i < table->s->fields; i++) {
-            dict_v_col_t*	v_col;
-            const Field*	field = table->field[i];
-
-            if (!!field->stored_in_db()) {
-                continue;
-            }
-            v_col = dict_table_get_nth_v_col(
-                dup_ib_table, z);
-            z++;
-            innodb_base_col_setup(
-                dup_ib_table, field, v_col);
-        }
-    }
-
-    dict_table_add_system_columns(dup_ib_table, heap);
-
-    dup_ib_table->indexes = ib_table->indexes;
-
-dup_ib_table_failed:
-    return dup_ib_table;
-}
-
-
 /** Update metadata BLOB to reflect updated persistent count.
 @param[in]  user_table  InnoDB table
 @param[in]	table		MySQL table
@@ -6150,18 +6013,6 @@ bool innobase_update_persistent_count(
 	instant_metadata_lock(*index, mtr);
 	const unsigned n_old_fields = index->n_fields;
 
-	ulint*	col_map = static_cast<ulint*>(mem_heap_alloc(heap, 
-						size_t(user_table->n_cols) * sizeof(ulint)));
-	for (unsigned i = 0; i < user_table->n_cols; i++) {
-		col_map[i] = i;
-	}
-
-	/* Duplicate user_table to pass into user_table->instant_column(...) */
-	dict_table_t* instant_table = duplicate_dict_table(user_table, table, heap);
-
-	mutex_enter(&dict_sys.mutex);
-	const bool metadata_changed = user_table->instant_column(*instant_table,
-									col_map);
 	mutex_enter(&dict_sys.mutex);
 
 	/* Release the page latch. Between this and the next
@@ -6226,15 +6077,6 @@ bool innobase_update_persistent_count(
 		i++;
 	}
 
-	if (innodb_update_cols(user_table, dict_table_encode_n_col(
-				       unsigned(user_table->n_cols)
-				       - DATA_N_SYS_COLS,
-				       user_table->n_v_cols)
-			       | (user_table->flags & DICT_TF_COMPACT) << 31,
-			       trx)) {
-		return true;
-	}
-
 	unsigned i = unsigned(user_table->n_cols) - DATA_N_SYS_COLS;
 	DBUG_ASSERT(i >= table->s->stored_fields);
 	DBUG_ASSERT(i <= table->s->stored_fields + 1);
@@ -6282,10 +6124,6 @@ bool innobase_update_persistent_count(
 		if (!page_has_next(block->frame)
 		    && page_rec_is_last(rec, block->frame)) {
 			goto empty_table;
-		}
-
-		if (!metadata_changed) {
-			goto func_exit;
 		}
 
 		/* Ensure that the root page is in the correct format. */
@@ -6359,7 +6197,6 @@ bool innobase_update_persistent_count(
 			mem_heap_free(offsets_heap);
 		}
 		btr_pcur_close(&pcur);
-		goto func_exit;
 	} else if (page_rec_is_supremum(rec)) {
 empty_table:
 		/* The table is empty. */
@@ -6369,38 +6206,14 @@ empty_table:
 		/* MDEV-17383: free metadata BLOBs! */
 		btr_page_empty(block, NULL, index, 0, &mtr);
 		index->clear_instant_alter();
-		goto func_exit;
 	} else if (!user_table->is_instant()) {
 		ut_ad(!user_table->not_redundant());
-		goto func_exit;
-	}
-
-	/* Convert the table to the instant ALTER TABLE format. */
-	mtr.commit();
-	mtr.start();
-	index->set_modified(mtr);
-	if (buf_block_t* root = btr_root_block_get(index, RW_SX_LATCH, &mtr)) {
-		if (root->page.encrypted
-		    || fil_page_get_type(root->frame) != FIL_PAGE_INDEX) {
-			DBUG_ASSERT(!"wrong page type");
-			goto err_exit;
-		}
-
-		btr_set_instant(root, *index, &mtr);
-		mtr.commit();
-		mtr.start();
-		index->set_modified(mtr);
-		err = row_ins_clust_index_entry_low(
-			BTR_NO_LOCKING_FLAG, BTR_MODIFY_TREE, index,
-			index->n_uniq, entry, 0, thr, false);
-	} else {
-err_exit:
-		err = DB_CORRUPTION;
 	}
 
 func_exit:
+	mutex_exit(&dict_sys.mutex);
 	mtr.commit();
-    mem_heap_free(heap);
+	mem_heap_free(heap);
 
 	if (err != DB_SUCCESS) {
 		my_error_innodb(err, table->s->table_name.str,
